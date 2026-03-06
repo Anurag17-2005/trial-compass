@@ -1,77 +1,68 @@
 import { useEffect, useRef } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import { Trial } from "@/data/types";
 
-const recruitingIcon = new L.DivIcon({
-  html: `<div style="background:#16a34a;width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3)"></div>`,
-  className: "",
-  iconSize: [14, 14],
-  iconAnchor: [7, 7],
-});
-
-const closedIcon = new L.DivIcon({
-  html: `<div style="background:#6b7280;width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3)"></div>`,
-  className: "",
-  iconSize: [14, 14],
-  iconAnchor: [7, 7],
-});
-
-function FitBounds({ trials }: { trials: Trial[] }) {
-  const map = useMap();
-  const prevLength = useRef(0);
+const MapPanel = ({ trials }: { trials: Trial[] }) => {
+  const mapRef = useRef<L.Map | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const markersRef = useRef<L.LayerGroup | null>(null);
 
   useEffect(() => {
-    if (trials.length > 0 && trials.length !== prevLength.current) {
+    if (!containerRef.current || mapRef.current) return;
+
+    mapRef.current = L.map(containerRef.current, {
+      center: [56.1304, -106.3468],
+      zoom: 4,
+      scrollWheelZoom: true,
+    });
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(mapRef.current);
+
+    markersRef.current = L.layerGroup().addTo(mapRef.current);
+
+    return () => {
+      mapRef.current?.remove();
+      mapRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapRef.current || !markersRef.current) return;
+
+    markersRef.current.clearLayers();
+
+    trials.forEach((trial) => {
+      const color = trial.recruitment_status === "Recruiting" ? "#16a34a" : "#6b7280";
+      const icon = new L.DivIcon({
+        html: `<div style="background:${color};width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3)"></div>`,
+        className: "",
+        iconSize: [14, 14],
+        iconAnchor: [7, 7],
+      });
+
+      const marker = L.marker([trial.latitude, trial.longitude], { icon });
+      marker.bindPopup(`
+        <div style="max-width:240px;font-size:13px">
+          <p style="font-weight:700;margin-bottom:4px">${trial.title}</p>
+          <p style="color:#6b7280">${trial.hospital}</p>
+          <p style="color:#6b7280">${trial.city}, ${trial.province}</p>
+          <p style="margin-top:4px;font-weight:600;color:${color}">${trial.recruitment_status}</p>
+        </div>
+      `);
+      markersRef.current!.addLayer(marker);
+    });
+
+    if (trials.length > 0) {
       const bounds = L.latLngBounds(trials.map((t) => [t.latitude, t.longitude]));
-      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 10 });
-      prevLength.current = trials.length;
+      mapRef.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 10 });
     }
-  }, [trials, map]);
+  }, [trials]);
 
-  return null;
-}
-
-interface MapPanelProps {
-  trials: Trial[];
-}
-
-const MapPanel = ({ trials }: MapPanelProps) => {
   return (
     <div className="h-full w-full relative">
-      <MapContainer
-        center={[56.1304, -106.3468]}
-        zoom={4}
-        className="h-full w-full z-0"
-        scrollWheelZoom
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        <FitBounds trials={trials} />
-        {trials.map((trial) => (
-          <Marker
-            key={trial.trial_id}
-            position={[trial.latitude, trial.longitude]}
-            icon={trial.recruitment_status === "Recruiting" ? recruitingIcon : closedIcon}
-          >
-            <Popup>
-              <div className="text-sm max-w-[240px]">
-                <p className="font-bold mb-1">{trial.title}</p>
-                <p className="text-muted-foreground">{trial.hospital}</p>
-                <p className="text-muted-foreground">{trial.city}, {trial.province}</p>
-                <p className="mt-1">
-                  <span className={trial.recruitment_status === "Recruiting" ? "text-recruiting font-semibold" : "text-closed font-semibold"}>
-                    {trial.recruitment_status}
-                  </span>
-                </p>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
-      </MapContainer>
-
+      <div ref={containerRef} className="h-full w-full z-0" />
       <div className="absolute bottom-4 left-4 bg-card/90 backdrop-blur-sm rounded-lg px-3 py-2 z-[1000] border border-border">
         <div className="flex items-center gap-3 text-xs">
           <span className="flex items-center gap-1">
