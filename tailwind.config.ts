@@ -47,6 +47,15 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        recruiting: {
+          DEFAULT: "hsl(var(--recruiting))",
+          foreground: "hsl(var(--recruiting-foreground))",
+        },
+        closed: {
+          DEFAULT: "hsl(var(--closed))",
+          foreground: "hsl(var(--closed-foreground))",
+        },
+        "info-label": "hsl(var(--info-label))",
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",
