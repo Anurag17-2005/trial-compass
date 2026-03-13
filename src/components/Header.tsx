@@ -1,6 +1,13 @@
 import { Link, useLocation } from "react-router-dom";
+import ProfileDialog from "./ProfileDialog";
+import { UserProfile } from "@/data/types";
 
-const Header = () => {
+interface HeaderProps {
+  userProfile?: UserProfile;
+  onProfileUpdate?: (profile: UserProfile) => void;
+}
+
+const Header = ({ userProfile, onProfileUpdate }: HeaderProps) => {
   const location = useLocation();
 
   return (
@@ -32,8 +39,11 @@ const Header = () => {
           </Link>
         </nav>
 
-        <div className="hidden md:flex items-center gap-4">
-          <span className="text-sm text-muted-foreground">English</span>
+        <div className="flex items-center gap-4">
+          <span className="hidden md:inline text-sm text-muted-foreground">English</span>
+          {userProfile && onProfileUpdate && (
+            <ProfileDialog userProfile={userProfile} onProfileUpdate={onProfileUpdate} />
+          )}
         </div>
 
         <button className="md:hidden p-2" aria-label="Menu">

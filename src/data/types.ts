@@ -30,6 +30,21 @@ export interface ChatMessage {
   trials?: Trial[];
 }
 
+export interface UserProfile {
+  id?: string;
+  name: string;
+  age: number;
+  location: string;
+  city: string;
+  province: string;
+  latitude: number;
+  longitude: number;
+  cancer_type: string;
+  disease_stage: string;
+  biomarkers: string[];
+  medical_history: string;
+}
+
 export interface FilterState {
   cancer_type: string;
   disease_stage: string;

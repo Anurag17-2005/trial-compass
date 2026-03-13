@@ -1,49 +1,128 @@
 import { Trial } from "./types";
 
 export const trials: Trial[] = [
+  // DEMONSTRATION TRIALS - Strategically placed for showcasing features
+  // User Location: Toronto, Ontario (43.6629, -79.3957)
+  
+  // === NEAR TORONTO - FAIR MATCH (40-45%) ===
+  // Trial 1: Very close - 3 km away
   {
-    trial_id: "25-5444.0",
-    nct_id: "NCT07355348",
-    title: "Feasibility of a Cognitive Stepped Care Program for Adults With Brain Metastases",
-    cancer_type: "Brain",
-    disease_stage: "Not applicable",
+    trial_id: "DEMO-FAIR-1",
+    nct_id: "NCT09400001",
+    title: "Chemotherapy Combination for Early Stage Lung Cancer",
+    cancer_type: "Lung",
+    disease_stage: "Stage I-II", // Different stage = lower match
+    treatment_type: "Chemotherapy",
+    biomarkers: [], // No biomarker match
+    phase: "Phase 2",
+    recruitment_status: "Recruiting",
+    hospital: "Mount Sinai Hospital",
+    city: "Toronto",
+    province: "Ontario",
+    latitude: 43.6555,
+    longitude: -79.3871,
+    start_date: "2026-03-21",
+    end_date: "2028-03-21",
+    principal_investigator: "Dr. Jennifer Park",
+    description: "Phase 2 study of neoadjuvant chemotherapy with carboplatin and pemetrexed for early-stage lung cancer patients.",
+    inclusion_criteria: [
+      "Age ≥ 18 years",
+      "Stage I-II non-small cell lung cancer",
+      "Candidate for surgical resection",
+      "ECOG 0-1",
+      "No prior chemotherapy"
+    ],
+    exclusion_criteria: [
+      "Small cell lung cancer",
+      "Prior thoracic radiation",
+      "Severe renal impairment",
+      "Pregnancy or breastfeeding"
+    ],
+    contact_email: "trials@sinai.ca",
+    contact_phone: "416-586-4800"
+  },
+  // Trial 2: Close - 5 km away
+  {
+    trial_id: "DEMO-FAIR-2",
+    nct_id: "NCT09400002",
+    title: "Radiation Therapy for Stage II-III Lung Cancer",
+    cancer_type: "Lung",
+    disease_stage: "Stage II-III",
+    treatment_type: "Radiation",
+    biomarkers: [],
+    phase: "Phase 2",
+    recruitment_status: "Recruiting",
+    hospital: "St. Michael's Hospital",
+    city: "Toronto",
+    province: "Ontario",
+    latitude: 43.6543,
+    longitude: -79.3768,
+    start_date: "2026-03-15",
+    end_date: "2028-03-15",
+    principal_investigator: "Dr. Robert Martinez",
+    description: "Phase 2 trial evaluating stereotactic body radiation therapy (SBRT) for locally advanced lung cancer.",
+    inclusion_criteria: [
+      "Age ≥ 18 years",
+      "Stage II-III lung cancer",
+      "Not candidate for surgery",
+      "ECOG 0-2",
+      "Adequate pulmonary function"
+    ],
+    exclusion_criteria: [
+      "Prior thoracic radiation",
+      "Active infection",
+      "Severe COPD",
+      "Pregnancy"
+    ],
+    contact_email: "radiation@smh.ca",
+    contact_phone: "416-360-4000"
+  },
+  // Trial 3: Nearby - 8 km away
+  {
+    trial_id: "DEMO-FAIR-3",
+    nct_id: "NCT09400003",
+    title: "Supportive Care for Advanced Lung Cancer Patients",
+    cancer_type: "Lung",
+    disease_stage: "Stage II-IV",
     treatment_type: "Supportive Care",
     biomarkers: [],
     phase: "Phase 2",
     recruitment_status: "Recruiting",
-    hospital: "PMH - Princess Margaret Cancer Center",
+    hospital: "Sunnybrook Health Sciences Centre",
     city: "Toronto",
     province: "Ontario",
-    latitude: 43.6591,
-    longitude: -79.3884,
-    start_date: "2025-01-15",
-    end_date: "2027-06-30",
-    principal_investigator: "Dr. Samantha Mayo",
-    description: "This study evaluates the feasibility and acceptability of a Cognitive Stepped Care Program (CSCP) for adults with brain metastases. The CSCP provides structured cognitive support including assessment, psychoeducation, strategy training, and specialist consultation. Patients will complete questionnaires before and after the intervention regarding their symptoms and quality of life.",
+    latitude: 43.7232,
+    longitude: -79.3832,
+    start_date: "2026-03-18",
+    end_date: "2028-03-18",
+    principal_investigator: "Dr. Emily Watson",
+    description: "Phase 2 study evaluating comprehensive supportive care interventions for symptom management in advanced lung cancer.",
     inclusion_criteria: [
-      "Diagnosed with a brain metastasis for any primary cancer",
-      "Receiving follow-up care in the Brain Metastases Clinic",
-      "Adult (≥ 18 years)",
-      "Able to speak, read, and write in English",
-      "Able to provide written informed consent"
+      "Age ≥ 18 years",
+      "Stage II-IV lung cancer",
+      "Experiencing cancer-related symptoms",
+      "ECOG 0-3",
+      "Life expectancy > 3 months"
     ],
     exclusion_criteria: [
-      "History of significant developmental/learning disability or psychiatric disorder",
-      "Acquired neurological disorder (e.g., traumatic brain injury)",
-      "Poor performance status (ECOG ≥ 3)",
-      "Life expectancy < 3 months"
+      "Unable to complete questionnaires",
+      "Active psychiatric disorder",
+      "Non-English speaking"
     ],
-    contact_email: "brain.trials@pmh.ca",
-    contact_phone: "416-946-2000"
+    contact_email: "supportive@sunnybrook.ca",
+    contact_phone: "416-480-6100"
   },
+
+  // === MODERATE DISTANCE - GOOD MATCH (60%) ===
+  // Trial 4: Hamilton - 65 km away
   {
-    trial_id: "BGB-11417-304",
-    nct_id: "NCT07277231",
-    title: "Sonrotoclax Plus Zanubrutinib Compared With Venetoclax Plus Acalabrutinib in Adults With Previously Untreated Chronic Lymphocytic Leukemia",
-    cancer_type: "Leukemia",
-    disease_stage: "Stage I-IV",
-    treatment_type: "Drug Combination",
-    biomarkers: ["BTK", "BCL-2"],
+    trial_id: "DEMO-GOOD-1",
+    nct_id: "NCT09600001",
+    title: "Targeted Therapy for Stage III Lung Cancer with EGFR",
+    cancer_type: "Lung",
+    disease_stage: "Stage III",
+    treatment_type: "Targeted Therapy",
+    biomarkers: ["EGFR"], // Partial biomarker match
     phase: "Phase 3",
     recruitment_status: "Recruiting",
     hospital: "Juravinski Cancer Centre",
@@ -51,26 +130,141 @@ export const trials: Trial[] = [
     province: "Ontario",
     latitude: 43.2387,
     longitude: -79.8881,
-    start_date: "2024-09-01",
+    start_date: "2026-03-10",
     end_date: "2028-12-31",
     principal_investigator: "Dr. Michael Chen",
-    description: "A randomized, open-label study investigating the efficacy and safety of sonrotoclax (BGB-11417) in combination with zanubrutinib (BGB-3111) compared with venetoclax plus acalabrutinib in adult participants with previously untreated chronic lymphocytic leukemia.",
+    description: "Phase 3 trial investigating osimertinib combined with chemotherapy for EGFR-mutated Stage III lung cancer.",
     inclusion_criteria: [
       "Age ≥ 18 years",
-      "Confirmed diagnosis of CLL requiring treatment",
-      "No prior systemic therapy for CLL",
-      "ECOG performance status 0-2",
+      "Stage III lung cancer",
+      "EGFR mutation positive",
+      "No prior EGFR inhibitor therapy",
+      "ECOG 0-1"
+    ],
+    exclusion_criteria: [
+      "Prior EGFR-targeted therapy",
+      "Interstitial lung disease",
+      "Uncontrolled hypertension",
+      "Active infection"
+    ],
+    contact_email: "egfr.trials@juravinski.ca",
+    contact_phone: "905-387-9711"
+  },
+  // Trial 5: Mississauga - 30 km away
+  {
+    trial_id: "DEMO-GOOD-2",
+    nct_id: "NCT09600002",
+    title: "Immunotherapy Plus Chemotherapy for Stage III Lung Cancer",
+    cancer_type: "Lung",
+    disease_stage: "Stage III",
+    treatment_type: "Drug Combination",
+    biomarkers: ["PD-L1"], // Partial biomarker match
+    phase: "Phase 2",
+    recruitment_status: "Recruiting",
+    hospital: "Trillium Health Partners",
+    city: "Mississauga",
+    province: "Ontario",
+    latitude: 43.5890,
+    longitude: -79.6441,
+    start_date: "2026-04-07",
+    end_date: "2028-04-07",
+    principal_investigator: "Dr. Robert Kumar",
+    description: "Phase 2 study combining pembrolizumab with platinum-based chemotherapy for Stage III lung cancer with PD-L1 expression.",
+    inclusion_criteria: [
+      "Age ≥ 18 years",
+      "Stage III lung cancer",
+      "PD-L1 expression ≥ 1%",
+      "No prior immunotherapy",
+      "ECOG 0-2"
+    ],
+    exclusion_criteria: [
+      "Active autoimmune disease",
+      "Systemic immunosuppression",
+      "Untreated brain metastases",
+      "Severe pulmonary disease"
+    ],
+    contact_email: "research@trilliumhealth.ca",
+    contact_phone: "905-848-7100"
+  },
+
+  // === FAR DISTANCE - EXCELLENT MATCH (75%) ===
+  // Trial 6: Ottawa - 450 km away
+  {
+    trial_id: "DEMO-EXCELLENT-1",
+    nct_id: "NCT09750001",
+    title: "Advanced Immunotherapy for Stage III Lung Cancer with PD-L1 and EGFR",
+    cancer_type: "Lung",
+    disease_stage: "Stage III",
+    treatment_type: "Immunotherapy",
+    biomarkers: ["PD-L1", "EGFR"], // Full biomarker match
+    phase: "Phase 2",
+    recruitment_status: "Recruiting",
+    hospital: "The Ottawa Hospital Cancer Centre",
+    city: "Ottawa",
+    province: "Ontario",
+    latitude: 45.4215,
+    longitude: -75.6972,
+    start_date: "2026-03-07",
+    end_date: "2028-03-07",
+    principal_investigator: "Dr. Sarah Chen",
+    description: "Phase 2 study evaluating advanced immunotherapy combining pembrolizumab with novel checkpoint inhibitors for Stage III lung cancer patients with PD-L1 and EGFR expression.",
+    inclusion_criteria: [
+      "Age ≥ 18 years",
+      "Histologically confirmed Stage III lung cancer",
+      "PD-L1 expression ≥ 50%",
+      "EGFR mutation positive",
+      "ECOG performance status 0-1",
       "Adequate organ function"
     ],
     exclusion_criteria: [
-      "Prior treatment with BTK or BCL-2 inhibitors",
-      "Known CNS involvement",
-      "Active autoimmune hemolytic anemia",
-      "Uncontrolled infection requiring IV antibiotics"
+      "Prior immunotherapy",
+      "Active autoimmune disease",
+      "Uncontrolled brain metastases",
+      "Severe cardiac disease"
     ],
-    contact_email: "cll.study@juravinski.ca",
-    contact_phone: "905-387-9711"
+    contact_email: "lung.trials@ottawahospital.ca",
+    contact_phone: "613-737-7700"
   },
+
+  // === BACKUP TRIALS (for variety) ===
+  // 90% Match - Perfect match trial (very close, all criteria match) - STARTING TODAY
+  {
+    trial_id: "DEMO-90-PERFECT",
+    nct_id: "NCT09900001",
+    title: "Precision Immunotherapy for Stage III Lung Cancer",
+    cancer_type: "Lung",
+    disease_stage: "Stage III",
+    treatment_type: "Immunotherapy",
+    biomarkers: ["PD-L1", "EGFR"],
+    phase: "Phase 2",
+    recruitment_status: "Recruiting",
+    hospital: "Toronto General Hospital",
+    city: "Toronto",
+    province: "Ontario",
+    latitude: 43.6596,
+    longitude: -79.3877,
+    start_date: "2026-03-07",
+    end_date: "2028-03-07",
+    principal_investigator: "Dr. Lisa Anderson",
+    description: "Phase 2 study evaluating precision immunotherapy with biomarker-guided treatment selection for Stage III lung cancer patients.",
+    inclusion_criteria: [
+      "Age ≥ 18 years",
+      "Histologically confirmed Stage III lung cancer",
+      "PD-L1 expression ≥ 50%",
+      "EGFR mutation positive",
+      "ECOG performance status 0-1",
+      "Adequate organ function"
+    ],
+    exclusion_criteria: [
+      "Prior immunotherapy",
+      "Active autoimmune disease",
+      "Uncontrolled brain metastases",
+      "Severe cardiac disease"
+    ],
+    contact_email: "lung.trials@tgh.ca",
+    contact_phone: "416-340-4800"
+  },
+  // === TRIALS FROM OTHER PROVINCES (for variety) ===
   {
     trial_id: "ONC-2024-107",
     nct_id: "NCT06891234",
@@ -86,8 +280,8 @@ export const trials: Trial[] = [
     province: "British Columbia",
     latitude: 49.2627,
     longitude: -123.1207,
-    start_date: "2024-06-01",
-    end_date: "2027-12-31",
+    start_date: "2026-03-15",
+    end_date: "2028-12-31",
     principal_investigator: "Dr. Karen Gelmon",
     description: "Evaluating the combination of pembrolizumab with platinum-based chemotherapy as first-line treatment for patients with advanced non-small cell lung cancer with PD-L1 expression ≥ 1%.",
     inclusion_criteria: [
@@ -122,8 +316,8 @@ export const trials: Trial[] = [
     province: "Alberta",
     latitude: 51.0791,
     longitude: -114.1319,
-    start_date: "2024-03-15",
-    end_date: "2026-09-30",
+    start_date: "2026-03-20",
+    end_date: "2027-09-30",
     principal_investigator: "Dr. Patricia Tang",
     description: "A single-arm study evaluating trastuzumab deruxtecan (T-DXd) in patients with HER2-low expressing metastatic breast cancer who have progressed on prior endocrine therapy and CDK4/6 inhibitors.",
     inclusion_criteria: [
@@ -143,41 +337,6 @@ export const trials: Trial[] = [
     contact_phone: "403-521-3723"
   },
   {
-    trial_id: "CRC-2024-088",
-    nct_id: "NCT06992211",
-    title: "FOLFOX Plus Bevacizumab With or Without Atezolizumab in Metastatic Colorectal Cancer",
-    cancer_type: "Colorectal",
-    disease_stage: "Stage IV",
-    treatment_type: "Drug Combination",
-    biomarkers: ["MSS", "KRAS"],
-    phase: "Phase 3",
-    recruitment_status: "Recruiting",
-    hospital: "The Ottawa Hospital Cancer Centre",
-    city: "Ottawa",
-    province: "Ontario",
-    latitude: 45.3906,
-    longitude: -75.7200,
-    start_date: "2024-11-01",
-    end_date: "2028-03-31",
-    principal_investigator: "Dr. Rachel Goodwin",
-    description: "A randomized study comparing FOLFOX plus bevacizumab with or without atezolizumab as first-line treatment in patients with microsatellite stable metastatic colorectal cancer.",
-    inclusion_criteria: [
-      "Age ≥ 18 years",
-      "Histologically confirmed metastatic colorectal cancer",
-      "Microsatellite stable (MSS) tumor",
-      "No prior systemic therapy for metastatic disease",
-      "ECOG performance status 0-1"
-    ],
-    exclusion_criteria: [
-      "MSI-high or dMMR tumors",
-      "Prior immunotherapy",
-      "Active autoimmune disease",
-      "Uncontrolled hypertension"
-    ],
-    contact_email: "crc.trials@toh.ca",
-    contact_phone: "613-737-7700"
-  },
-  {
     trial_id: "PRO-2024-022",
     nct_id: "NCT07112233",
     title: "Enzalutamide Plus Talazoparib in Metastatic Castration-Resistant Prostate Cancer",
@@ -192,8 +351,8 @@ export const trials: Trial[] = [
     province: "Alberta",
     latitude: 53.5205,
     longitude: -113.5263,
-    start_date: "2024-07-01",
-    end_date: "2027-06-30",
+    start_date: "2026-04-01",
+    end_date: "2028-06-30",
     principal_investigator: "Dr. Scott North",
     description: "Evaluating the efficacy of enzalutamide in combination with talazoparib in patients with homologous recombination repair gene-mutated metastatic castration-resistant prostate cancer.",
     inclusion_criteria: [
@@ -226,8 +385,8 @@ export const trials: Trial[] = [
     province: "Nova Scotia",
     latitude: 44.6435,
     longitude: -63.5862,
-    start_date: "2024-04-01",
-    end_date: "2026-12-31",
+    start_date: "2026-04-10",
+    end_date: "2027-12-31",
     principal_investigator: "Dr. Carman Giacomantonio",
     description: "A study evaluating the combination of nivolumab and relatlimab (anti-LAG-3) in treatment-naive patients with unresectable stage III or stage IV melanoma.",
     inclusion_criteria: [
@@ -805,41 +964,6 @@ export const trials: Trial[] = [
     ],
     contact_email: "ovarian.research@mcgill.ca",
     contact_phone: "514-934-8038"
-  },
-  {
-    trial_id: "PAN-2024-077",
-    nct_id: "NCT07778945",
-    title: "Guadecitabine Plus Gemcitabine in Pancreatic Cancer",
-    cancer_type: "Pancreatic",
-    disease_stage: "Stage II-IV",
-    treatment_type: "Drug Combination",
-    biomarkers: ["BRCA2"],
-    phase: "Phase 2",
-    recruitment_status: "Recruiting",
-    hospital: "Peter MacCallum Cancer Centre",
-    city: "Melbourne",
-    province: "Victoria",
-    latitude: -37.8050,
-    longitude: 145.2093,
-    start_date: "2024-06-01",
-    end_date: "2026-12-31",
-    principal_investigator: "Dr. Samuel Leong",
-    description: "Phase 2 study of guadecitabine plus gemcitabine in advanced pancreatic cancer.",
-    inclusion_criteria: [
-      "Age ≥ 18 years",
-      "Locally advanced or metastatic pancreatic adenocarcinoma",
-      "Measurable disease",
-      "ECOG 0-1",
-      "Adequate organ function"
-    ],
-    exclusion_criteria: [
-      "Prior gemcitabine",
-      "Uncontrolled diabetes",
-      "Active cardiac disease",
-      "Brain metastases"
-    ],
-    contact_email: "pancreatic@petermac.org",
-    contact_phone: "03-9656-1111"
   },
   {
     trial_id: "MEL-2024-095",
