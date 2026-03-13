@@ -200,21 +200,10 @@ export class GeminiChatService {
   }
 
   private shouldTriggerSearch(userMessage: string, aiResponse: string): boolean {
-    const lower = userMessage.toLowerCase();
-    const responseLower = aiResponse.toLowerCase();
-    
-    // Trigger search if user explicitly asks
-    if (lower.includes("search") || lower.includes("find trial") || lower.includes("show me")) {
-      return this.conversationState.isComplete;
+    // Auto-trigger search whenever we have enough info collected
+    if (this.conversationState.isComplete) {
+      return true;
     }
-
-    // Trigger if AI indicates readiness to search
-    if (responseLower.includes("search for trials") || 
-        responseLower.includes("find trials") ||
-        responseLower.includes("look for trials")) {
-      return this.conversationState.isComplete;
-    }
-
     return false;
   }
 
