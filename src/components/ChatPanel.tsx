@@ -644,10 +644,12 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewTrialDe
               <div className="chat-bubble-user">
                 <p className="text-sm">{msg.content}</p>
               </div>
-            ) : msg.trials && msg.trials.length > 0 ? (
-              // Display trials as cards
+            ) : (
               <div className="w-full max-w-md space-y-2">
-                {msg.trials.map((trial) => (
+                <div className="chat-bubble-assistant">
+                  <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                </div>
+                {msg.trials && msg.trials.length > 0 && msg.trials.map((trial) => (
                   <div 
                     key={trial.trial_id}
                     ref={(el) => {
@@ -662,11 +664,6 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewTrialDe
                     />
                   </div>
                 ))}
-              </div>
-            ) : (
-              // Display text message
-              <div className="chat-bubble-assistant">
-                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
               </div>
             )}
           </div>
