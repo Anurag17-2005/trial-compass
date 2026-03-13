@@ -417,18 +417,10 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewTrialDe
             onTrialsFound(found);
           }
 
-          // Use Gemini to analyze and recommend the best trials
+          // Local summary - avoids extra Gemini call that can timeout on free tier
           let finalResponse = result.response;
-          if (found.length > 0 && userProfile) {
-            try {
-              const analysis = await geminiChat.analyzeTrials(found, userProfile);
-              finalResponse = analysis;
-            } catch (error) {
-              console.error("Analysis error:", error);
-              finalResponse += `\n\nI found ${found.length} matching trial${found.length > 1 ? 's' : ''} for you. Let me show you the details:`;
-            }
-          } else if (found.length > 0) {
-            finalResponse += `\n\nI found ${found.length} matching trial${found.length > 1 ? 's' : ''} for you. Let me show you the details:`;
+          if (found.length > 0) {
+            finalResponse += `\n\nGreat news! I found **${found.length} matching trial${found.length > 1 ? 's' : ''}** for you. Here are your best matches:`;
           } else {
             finalResponse += "\n\nI couldn't find any trials matching your specific criteria right now. Let me search more broadly for you.";
             // Fallback to broader search
@@ -652,10 +644,12 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewTrialDe
               <div className="chat-bubble-user">
                 <p className="text-sm">{msg.content}</p>
               </div>
-            ) : msg.trials && msg.trials.length > 0 ? (
-              // Display trials as cards
+            ) : (
               <div className="w-full max-w-md space-y-2">
-                {msg.trials.map((trial) => (
+                <div className="chat-bubble-assistant">
+                  <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                </div>
+                {msg.trials && msg.trials.length > 0 && msg.trials.map((trial) => (
                   <div 
                     key={trial.trial_id}
                     ref={(el) => {
@@ -670,11 +664,6 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewTrialDe
                     />
                   </div>
                 ))}
-              </div>
-            ) : (
-              // Display text message
-              <div className="chat-bubble-assistant">
-                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
               </div>
             )}
           </div>
