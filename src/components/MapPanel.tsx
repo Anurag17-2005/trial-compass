@@ -154,8 +154,8 @@ const MapPanel = forwardRef<MapPanelRef, MapPanelProps>(
           containerRef.current.innerHTML = "";
         }
 
-        const centerLat = userProfile ? userProfile.latitude : 56.1304;
-        const centerLon = userProfile ? userProfile.longitude : -106.3468;
+        const centerLat = userProfile?.latitude || 56.1304;
+        const centerLon = userProfile?.longitude || -106.3468;
 
         mapRef.current = L.map(containerRef.current, {
           center: [centerLat, centerLon],

@@ -189,11 +189,11 @@ function TrialResultCard({
           <Button
             size="sm"
             variant="outline"
-            className="flex-1 text-xs h-8 min-w-[80px]"
+            className="flex-1 text-xs h-8 min-w-[100px]"
             onClick={() => onViewDetails?.(trial)}
           >
             <Activity className="w-3 h-3 mr-1" />
-            Details
+            View Summary
           </Button>
           <Button
             size="sm"
