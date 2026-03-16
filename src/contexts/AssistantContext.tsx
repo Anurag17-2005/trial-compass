@@ -1,6 +1,5 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, ReactNode } from "react";
 import { ChatMessage, Trial, UserProfile } from "@/data/types";
-import { trials } from "@/data/trials";
 
 interface AssistantContextType {
   messages: ChatMessage[];
@@ -9,19 +8,24 @@ interface AssistantContextType {
   setMapTrials: (trials: Trial[]) => void;
   userProfile: UserProfile;
   setUserProfile: (profile: UserProfile) => void;
+  selectedSummaryTrial: Trial | null;
+  setSelectedSummaryTrial: (trial: Trial | null) => void;
+  profileReady: boolean;
+  setProfileReady: (ready: boolean) => void;
 }
 
+// Empty default - everything comes from conversation
 const defaultUserProfile: UserProfile = {
-  id: "user123",
-  name: "User",
-  age: 45,
-  location: "Toronto",
-  city: "Toronto",
-  province: "Ontario",
-  latitude: 43.6629,
-  longitude: -79.3957,
-  cancer_type: "Lung",
-  disease_stage: "Stage III",
+  id: "",
+  name: "Patient",
+  age: 0,
+  location: "",
+  city: "",
+  province: "",
+  latitude: 56.1304,  // Center of Canada
+  longitude: -106.3468,
+  cancer_type: "",
+  disease_stage: "",
   biomarkers: [],
   medical_history: "",
 };
@@ -34,25 +38,21 @@ export const AssistantProvider = ({ children }: { children: ReactNode }) => {
     {
       id: "welcome",
       role: "assistant",
-      content: "Hello! I'm here to help you find clinical trials that match your needs. To get started, I'd like to learn a bit about your condition. What type of cancer have you been diagnosed with?",
+      content: "Hi there! 👋 I'm here to help you find clinical trials in Canada. Let's start — what type of cancer have you been diagnosed with?",
     },
   ]);
-  const [mapTrials, setMapTrials] = useState<Trial[]>(trials);
-
-  // Keep welcome message conversational
-  useEffect(() => {
-    // Don't update welcome message automatically
-  }, [userProfile]);
+  const [mapTrials, setMapTrials] = useState<Trial[]>([]);
+  const [selectedSummaryTrial, setSelectedSummaryTrial] = useState<Trial | null>(null);
+  const [profileReady, setProfileReady] = useState(false);
 
   return (
     <AssistantContext.Provider
       value={{
-        messages,
-        setMessages,
-        mapTrials,
-        setMapTrials,
-        userProfile,
-        setUserProfile,
+        messages, setMessages,
+        mapTrials, setMapTrials,
+        userProfile, setUserProfile,
+        selectedSummaryTrial, setSelectedSummaryTrial,
+        profileReady, setProfileReady,
       }}
     >
       {children}
@@ -62,8 +62,6 @@ export const AssistantProvider = ({ children }: { children: ReactNode }) => {
 
 export const useAssistant = () => {
   const context = useContext(AssistantContext);
-  if (!context) {
-    throw new Error("useAssistant must be used within AssistantProvider");
-  }
+  if (!context) throw new Error("useAssistant must be used within AssistantProvider");
   return context;
 };
