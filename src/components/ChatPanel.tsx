@@ -1,10 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { ChatMessage, Trial, UserProfile } from "@/data/types";
 import { trials } from "@/data/trials";
-import { getRankedByBoth, calculateTrialSuitability, calculateDistance } from "@/lib/trialMatching";
+import { getRankedByBoth, getNearestTrials, getRankedTrials, calculateTrialSuitability, calculateDistance } from "@/lib/trialMatching";
 import { useAssistant } from "@/contexts/AssistantContext";
 import TrialResultCard from "./TrialResultCard";
-import { GroqChatService } from "@/lib/groqService";
 import ReactMarkdown from "react-markdown";
 import { Send, RotateCcw } from "lucide-react";
 
@@ -17,15 +16,34 @@ interface ChatPanelProps {
   selectedTrialId?: string | null;
 }
 
-const ChatPanel = ({ 
-  userProfile, onTrialsFound, onZoomToLocation, onViewTrialDetails, 
-  onViewSummary, selectedTrialId 
+type PostSearchIntent = "nearest" | "best" | "recruiting" | "both" | "all" | null;
+
+function detectPostSearchIntent(msg: string): PostSearchIntent {
+  const lower = msg.toLowerCase();
+  const nearWords = ["nearest", "closest", "near me", "nearby", "close to me", "near my"];
+  const bestWords = ["best", "top", "highest match", "most suitable", "recommended"];
+  const recruitWords = ["recruiting", "open", "accepting", "enrolling"];
+
+  const hasNear = nearWords.some(w => lower.includes(w));
+  const hasBest = bestWords.some(w => lower.includes(w));
+  const hasRecruit = recruitWords.some(w => lower.includes(w));
+
+  if (hasNear && hasBest) return "both";
+  if (lower.includes("all trials") || lower.includes("show all") || lower.includes("list all")) return "all";
+  if (hasNear) return "nearest";
+  if (hasBest) return "best";
+  if (hasRecruit) return "recruiting";
+  return null;
+}
+
+const ChatPanel = ({
+  userProfile, onTrialsFound, onZoomToLocation, onViewTrialDetails,
+  onViewSummary, selectedTrialId
 }: ChatPanelProps) => {
-  const { messages, setMessages, setUserProfile, setProfileReady } = useAssistant();
+  const { messages, setMessages, setUserProfile, setProfileReady, chatService, searchDone, setSearchDone, allFoundTrials, setAllFoundTrials } = useAssistant();
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [chatService] = useState(() => new GroqChatService());
-  const [searchDone, setSearchDone] = useState(false);
+  const [convState, setConvState] = useState(chatService.getState());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const trialCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -36,7 +54,6 @@ const ChatPanel = ({
     }
   }, [messages]);
 
-  // Scroll to trial card when selected from map
   useEffect(() => {
     if (selectedTrialId && trialCardRefs.current[selectedTrialId]) {
       trialCardRefs.current[selectedTrialId]?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -48,11 +65,24 @@ const ChatPanel = ({
     }
   }, [selectedTrialId]);
 
-  const performTrialSearch = (state: ReturnType<GroqChatService["getState"]>) => {
+  const buildProfile = useCallback(() => {
+    const coords = chatService.getCityCoordinates();
+    const profileUpdates = chatService.buildUserProfile();
+    const state = chatService.getState();
+    const updatedProfile: UserProfile = {
+      ...(userProfile || {} as UserProfile),
+      ...profileUpdates,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      location: `${state.city || ""}, ${state.province || ""}`,
+    };
+    return updatedProfile;
+  }, [chatService, userProfile]);
+
+  const performTrialSearch = useCallback(() => {
+    const state = chatService.getState();
     let found: Trial[] = trials.filter((t) => {
       if (state.cancer_type && !t.cancer_type.toLowerCase().includes(state.cancer_type.toLowerCase())) return false;
-      if (state.city && !t.city.toLowerCase().includes(state.city.toLowerCase())) return false;
-      if (state.province && t.province !== state.province) return false;
       if (state.disease_stage) {
         const stageNum = state.disease_stage.match(/[IViv]+$/)?.[0];
         if (stageNum && !t.disease_stage.toUpperCase().includes(stageNum.toUpperCase())) return false;
@@ -60,31 +90,70 @@ const ChatPanel = ({
       return true;
     });
 
-    // If strict filter returns nothing, try just cancer type
     if (found.length === 0 && state.cancer_type) {
       found = trials.filter(t => t.cancer_type.toLowerCase().includes(state.cancer_type!.toLowerCase()));
     }
 
-    // Update user profile with coordinates
-    const coords = chatService.getCityCoordinates();
-    const profileUpdates = chatService.buildUserProfile();
-    const updatedProfile: UserProfile = {
-      ...userProfile!,
-      ...profileUpdates,
-      latitude: coords.latitude,
-      longitude: coords.longitude,
-      location: `${state.city || ""}, ${state.province || ""}`,
-    };
+    const updatedProfile = buildProfile();
     setUserProfile(updatedProfile);
     setProfileReady(true);
 
-    // Rank trials using updated profile
+    // Store all found trials (unsliced) for post-search queries
+    setAllFoundTrials(found);
+
+    // Default: rank by combined score, show top 8
     if (found.length > 0) {
       found = getRankedByBoth(found, updatedProfile).slice(0, 8);
     }
 
-    return found;
-  };
+    return { found, profile: updatedProfile };
+  }, [chatService, buildProfile, setUserProfile, setProfileReady, setAllFoundTrials]);
+
+  const handlePostSearchIntent = useCallback((intent: PostSearchIntent, profile: UserProfile): { trials: Trial[]; message: string } | null => {
+    if (!intent || allFoundTrials.length === 0) return null;
+
+    switch (intent) {
+      case "nearest": {
+        const nearest = getNearestTrials(allFoundTrials, profile, 5);
+        return {
+          trials: nearest,
+          message: `Here are the **${nearest.length} nearest trials** to ${profile.city || "your location"}:`,
+        };
+      }
+      case "best": {
+        const best = getRankedTrials(allFoundTrials, profile).slice(0, 5);
+        return {
+          trials: best,
+          message: `Here are the **top ${best.length} best-matching trials** for your profile:`,
+        };
+      }
+      case "recruiting": {
+        const recruiting = allFoundTrials.filter(t => t.recruitment_status === "Recruiting");
+        const ranked = getRankedByBoth(recruiting, profile).slice(0, 6);
+        return {
+          trials: ranked,
+          message: `Found **${recruiting.length} recruiting trials**. Here are the top matches:`,
+        };
+      }
+      case "both": {
+        // Show nearest that also have high match
+        const ranked = getRankedByBoth(allFoundTrials, profile).slice(0, 6);
+        return {
+          trials: ranked,
+          message: `Here are trials ranked by **both proximity and match score**:`,
+        };
+      }
+      case "all": {
+        const ranked = getRankedByBoth(allFoundTrials, profile).slice(0, 12);
+        return {
+          trials: ranked,
+          message: `Showing **${ranked.length} of ${allFoundTrials.length} total trials** found:`,
+        };
+      }
+      default:
+        return null;
+    }
+  }, [allFoundTrials]);
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -95,16 +164,38 @@ const ChatPanel = ({
     setIsTyping(true);
 
     try {
+      // If search is done, check for post-search intents first
+      if (searchDone && userProfile) {
+        const intent = detectPostSearchIntent(currentInput);
+        if (intent) {
+          const result = handlePostSearchIntent(intent, userProfile);
+          if (result) {
+            if (onTrialsFound) onTrialsFound(result.trials);
+            const assistantMsg: ChatMessage = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: result.message,
+              trials: result.trials,
+            };
+            setMessages((prev) => [...prev, assistantMsg]);
+            setIsTyping(false);
+            setConvState(chatService.getState());
+            return;
+          }
+        }
+      }
+
       const result = await chatService.sendMessage(currentInput);
+      setConvState(chatService.getState());
 
       if (result.shouldSearch && !searchDone) {
-        const found = performTrialSearch(result.state);
+        const { found, profile } = performTrialSearch();
         setSearchDone(true);
 
         if (onTrialsFound) onTrialsFound(found);
 
         const summary = found.length > 0
-          ? `I found **${found.length} matching trial${found.length > 1 ? "s"  : ""}** for you. Here are your best matches:`
+          ? `I found **${found.length} matching trial${found.length > 1 ? "s" : ""}** for you. Here are your best matches:`
           : "I couldn't find trials matching your exact criteria. Try broadening your search.";
 
         const assistantMsg: ChatMessage = {
@@ -115,13 +206,18 @@ const ChatPanel = ({
         };
         setMessages((prev) => [...prev, assistantMsg]);
       } else {
-        // Regular conversational response
-        // Update profile progressively
+        // Update profile progressively (but don't set profileReady until search)
         if (userProfile) {
           const profileUpdates = chatService.buildUserProfile();
           if (Object.keys(profileUpdates).length > 0) {
-            const coords = chatService.getCityCoordinates();
-            setUserProfile({ ...userProfile, ...profileUpdates, latitude: coords.latitude, longitude: coords.longitude });
+            const state = chatService.getState();
+            // Only update coords if city was provided
+            if (state.city) {
+              const coords = chatService.getCityCoordinates();
+              setUserProfile({ ...userProfile, ...profileUpdates, latitude: coords.latitude, longitude: coords.longitude });
+            } else {
+              setUserProfile({ ...userProfile, ...profileUpdates });
+            }
           }
         }
 
@@ -148,6 +244,10 @@ const ChatPanel = ({
   const handleReset = () => {
     chatService.reset();
     setSearchDone(false);
+    setAllFoundTrials([]);
+    setConvState({ isComplete: false });
+    if (onTrialsFound) onTrialsFound([]);
+    setProfileReady(false);
     setMessages([{
       id: "welcome",
       role: "assistant",
@@ -155,22 +255,21 @@ const ChatPanel = ({
     }]);
   };
 
-  // Dynamic suggestion chips based on conversation state
+  // Dynamic suggestion chips based on reactive conversation state
   const getSuggestions = (): string[] => {
-    const state = chatService.getState();
     if (searchDone) {
-      return ["Find nearest trials", "Show best matches", "Start a new search"];
+      return ["Find nearest trials", "Show best matches", "Show recruiting trials", "Best and nearest"];
     }
-    if (!state.cancer_type) {
+    if (!convState.cancer_type) {
       return ["I have lung cancer", "I have breast cancer", "I have colorectal cancer"];
     }
-    if (!state.disease_stage) {
+    if (!convState.disease_stage) {
       return ["Stage 1", "Stage 2", "Stage 3", "Stage 4"];
     }
-    if (!state.age) {
+    if (!convState.age) {
       return ["I'm 45 years old", "I'm 55 years old", "I'm 65 years old"];
     }
-    if (!state.city) {
+    if (!convState.city) {
       return ["I live in Toronto", "I live in Vancouver", "I live in Montreal"];
     }
     return [];
@@ -269,13 +368,7 @@ const ChatPanel = ({
           {getSuggestions().map((s) => (
             <button
               key={s}
-              onClick={() => {
-                if (s === "Start a new search") {
-                  handleReset();
-                } else {
-                  setInput(s);
-                }
-              }}
+              onClick={() => { setInput(s); }}
               className="text-xs px-3 py-1.5 rounded-full border border-border text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
             >
               {s}

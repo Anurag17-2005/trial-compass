@@ -40,6 +40,11 @@ const TrialSummaryPanel = ({ trial, userProfile, onClose }: TrialSummaryPanelPro
 
   const matchInfo = getSuitabilityLabel(suitability);
 
+  // Build CCS link from nct_id
+  const ccsUrl = trial.nct_id
+    ? `https://www.canadiancancertrials.ca/trial/${trial.nct_id}`
+    : null;
+
   return (
     <div className="h-full flex flex-col bg-card border-t border-border">
       {/* Header */}
@@ -154,15 +159,28 @@ const TrialSummaryPanel = ({ trial, userProfile, onClose }: TrialSummaryPanelPro
           </a>
         </div>
 
-        {/* CTA */}
-        <Button
-          size="sm"
-          className="w-full text-xs"
-          onClick={() => window.open(`/trial/${trial.trial_id}`, '_blank')}
-        >
-          <ExternalLink className="w-3 h-3 mr-1" />
-          View Full Details
-        </Button>
+        {/* CTAs */}
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            className="flex-1 text-xs"
+            onClick={() => window.open(`/trial/${trial.trial_id}`, '_blank')}
+          >
+            <ExternalLink className="w-3 h-3 mr-1" />
+            View Full Details
+          </Button>
+          {ccsUrl && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1 text-xs"
+              onClick={() => window.open(ccsUrl, '_blank')}
+            >
+              <ExternalLink className="w-3 h-3 mr-1" />
+              View on CCS Website
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
