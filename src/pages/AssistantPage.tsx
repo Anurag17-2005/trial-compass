@@ -7,7 +7,7 @@ import { useAssistant } from "@/contexts/AssistantContext";
 import { Trial } from "@/data/types";
 
 const AssistantPage = () => {
-  const { userProfile, setUserProfile, mapTrials, selectedSummaryTrial, setSelectedSummaryTrial, profileReady } = useAssistant();
+  const { userProfile, setUserProfile, mapTrials, setMapTrials, selectedSummaryTrial, setSelectedSummaryTrial, profileReady } = useAssistant();
   const [selectedTrialId, setSelectedTrialId] = useState<string | null>(null);
   const mapRef = useRef<MapPanelRef>(null);
 
