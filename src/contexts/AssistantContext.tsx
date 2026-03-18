@@ -1,20 +1,25 @@
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useContext, useState, useRef, ReactNode } from "react";
 import { ChatMessage, Trial, UserProfile } from "@/data/types";
+import { GroqChatService } from "@/lib/groqService";
 
 interface AssistantContextType {
   messages: ChatMessage[];
   setMessages: (messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
   mapTrials: Trial[];
   setMapTrials: (trials: Trial[]) => void;
+  allFoundTrials: Trial[];
+  setAllFoundTrials: (trials: Trial[]) => void;
   userProfile: UserProfile;
   setUserProfile: (profile: UserProfile) => void;
   selectedSummaryTrial: Trial | null;
   setSelectedSummaryTrial: (trial: Trial | null) => void;
   profileReady: boolean;
   setProfileReady: (ready: boolean) => void;
+  searchDone: boolean;
+  setSearchDone: (done: boolean) => void;
+  chatService: GroqChatService;
 }
 
-// Empty default - everything comes from conversation
 const defaultUserProfile: UserProfile = {
   id: "",
   name: "Patient",
@@ -22,7 +27,7 @@ const defaultUserProfile: UserProfile = {
   location: "",
   city: "",
   province: "",
-  latitude: 56.1304,  // Center of Canada
+  latitude: 56.1304,
   longitude: -106.3468,
   cancer_type: "",
   disease_stage: "",
@@ -42,17 +47,23 @@ export const AssistantProvider = ({ children }: { children: ReactNode }) => {
     },
   ]);
   const [mapTrials, setMapTrials] = useState<Trial[]>([]);
+  const [allFoundTrials, setAllFoundTrials] = useState<Trial[]>([]);
   const [selectedSummaryTrial, setSelectedSummaryTrial] = useState<Trial | null>(null);
   const [profileReady, setProfileReady] = useState(false);
+  const [searchDone, setSearchDone] = useState(false);
+  const chatServiceRef = useRef(new GroqChatService());
 
   return (
     <AssistantContext.Provider
       value={{
         messages, setMessages,
         mapTrials, setMapTrials,
+        allFoundTrials, setAllFoundTrials,
         userProfile, setUserProfile,
         selectedSummaryTrial, setSelectedSummaryTrial,
         profileReady, setProfileReady,
+        searchDone, setSearchDone,
+        chatService: chatServiceRef.current,
       }}
     >
       {children}
