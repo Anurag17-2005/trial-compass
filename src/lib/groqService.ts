@@ -104,6 +104,20 @@ export class GroqChatService {
   private extractInfo(msg: string) {
     const lower = msg.toLowerCase();
 
+    // Detect change intent — clear the relevant field so it can be re-collected
+    if (lower.includes("change") || lower.includes("update") || lower.includes("correct")) {
+      if (lower.includes("stage")) this.state.disease_stage = undefined;
+      if (lower.includes("age")) this.state.age = undefined;
+      if (lower.includes("cancer") || lower.includes("type")) this.state.cancer_type = undefined;
+      if (lower.includes("city") || lower.includes("location")) {
+        this.state.city = undefined;
+        this.state.province = undefined;
+      }
+      // After clearing, recalculate completeness
+      this.state.isComplete = false;
+      return; // Don't extract from a change-request message
+    }
+
     // Cancer type
     const cancerTypes = [
       "lung", "breast", "brain", "colorectal", "colon", "prostate", "melanoma",
