@@ -3,6 +3,12 @@ import { UserProfile } from "@/data/types";
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || "";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
+// Two models:
+// - Vision: llama-4-scout for image/PDF extraction (multimodal)
+// - Chat:   llama-3.3-70b for conversation (fast, reliable)
+const VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
+const CHAT_MODEL = "llama-3.3-70b-versatile";
+
 export interface ConversationMessage {
   role: "system" | "user" | "assistant";
   content: string;
@@ -60,7 +66,7 @@ Does everything look correct? I'll find your matching trials once you confirm. �
 - Do NOT proceed to search unless user explicitly confirms the table
 - If user wants to change something after the table, ask what to change, update it, show the table again
 - Never give medical advice — only help find trials
-- If a field was pre-filled from an uploaded report, acknowledge it warmly and skip asking for it
+- If fields were pre-filled from an uploaded report, acknowledge warmly and only ask for what is still missing
 
 ## TONE EXAMPLES:
 - "I'm sorry to hear that. What stage has your oncologist identified?"
@@ -69,6 +75,80 @@ Does everything look correct? I'll find your matching trials once you confirm. �
 - "Do you know any of your biomarkers, like EGFR or PD-L1? It's fine to skip this."
 - "One last question — when were you first diagnosed? You can say something like 'about a year ago', give a year, or skip."`;
 
+// ── Extract profile from image using Groq vision model ────────────────────
+export async function extractProfileFromImageGroq(
+  base64Image: string,
+  mimeType: string
+): Promise<Partial<ConversationState>> {
+  const response = await fetch(GROQ_URL, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${GROQ_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: VISION_MODEL,
+      max_tokens: 1000,
+      temperature: 0.1, // low temp for accurate extraction
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${mimeType};base64,${base64Image}`,
+              },
+            },
+            {
+              type: "text",
+              text: `You are a medical data extractor. Look at this medical/pathology/lab report image and extract the following information.
+
+Return ONLY a valid JSON object with these exact keys. Use null if a field is not found or unclear.
+
+{
+  "patient_name": "full patient name as string or null",
+  "age": age as integer number or null,
+  "cancer_type": "one of: Lung, Breast, Colorectal, Prostate, Melanoma, Ovarian, Lymphoma, Pancreatic, Thyroid, Bladder, Kidney, Myeloma, Liver, Leukemia, Brain, Sarcoma, Gastric, Cervical, Endometrial, Head and Neck — or null if not found",
+  "disease_stage": "one of: Stage I, Stage II, Stage III, Stage IV — or null if not found",
+  "biomarkers": ["array of biomarker names found e.g. EGFR, PD-L1, KRAS, HER2, BRCA1, BRCA2, ALK, ROS1, BRAF — or empty array []"],
+  "diagnosis_date": "date or period as string e.g. '2023', 'March 2024', '6 months ago' — or null",
+  "city": "Canadian city name or null",
+  "province": "Canadian province full name or null"
+}
+
+Return ONLY the JSON. No explanation, no markdown fences, no extra text.`,
+            },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Groq vision API error ${response.status}: ${err}`);
+  }
+
+  const data = await response.json();
+  const text = data.choices?.[0]?.message?.content || "{}";
+
+  // Clean and parse
+  const clean = text.replace(/```json|```/g, "").trim();
+  const parsed = JSON.parse(clean);
+
+  const result: Partial<ConversationState> = {};
+  if (parsed.patient_name && typeof parsed.patient_name === "string") result.patient_name = parsed.patient_name;
+  if (parsed.age && typeof parsed.age === "number" && parsed.age >= 1 && parsed.age <= 120) result.age = parsed.age;
+  if (parsed.cancer_type && typeof parsed.cancer_type === "string") result.cancer_type = parsed.cancer_type;
+  if (parsed.disease_stage && typeof parsed.disease_stage === "string") result.disease_stage = parsed.disease_stage;
+  if (Array.isArray(parsed.biomarkers) && parsed.biomarkers.length > 0) result.biomarkers = parsed.biomarkers;
+  if (parsed.diagnosis_date && typeof parsed.diagnosis_date === "string") result.diagnosis_date = parsed.diagnosis_date;
+  if (parsed.city && typeof parsed.city === "string") result.city = parsed.city;
+  if (parsed.province && typeof parsed.province === "string") result.province = parsed.province;
+
+  return result;
+}
 
 export class GroqChatService {
   private history: ConversationMessage[] = [];
@@ -78,9 +158,8 @@ export class GroqChatService {
     this.history = [{ role: "system", content: SYSTEM_PROMPT }];
   }
 
-  // ── NEW: inject profile extracted from uploaded report ─────────────────
+  // ── Inject extracted profile into state + LLM context ─────────────────
   injectExtractedProfile(extracted: Partial<ConversationState>): string {
-    // Merge extracted values into state
     if (extracted.patient_name) this.state.patient_name = extracted.patient_name;
     if (extracted.age) this.state.age = extracted.age;
     if (extracted.cancer_type) this.state.cancer_type = extracted.cancer_type;
@@ -90,32 +169,22 @@ export class GroqChatService {
     if (extracted.city) this.state.city = extracted.city;
     if (extracted.province) this.state.province = extracted.province;
 
-    // Update completeness
     this.state.isComplete = !!(
-      this.state.cancer_type &&
-      this.state.disease_stage &&
-      this.state.age &&
-      (this.state.city || this.state.province)
+      this.state.cancer_type && this.state.disease_stage &&
+      this.state.age && (this.state.city || this.state.province)
     );
 
-    // Build a context message to inject into LLM history
-    const lines: string[] = [];
-    if (extracted.patient_name) lines.push(`Patient name: ${extracted.patient_name}`);
-    if (extracted.age) lines.push(`Age: ${extracted.age}`);
-    if (extracted.cancer_type) lines.push(`Cancer type: ${extracted.cancer_type}`);
-    if (extracted.disease_stage) lines.push(`Disease stage: ${extracted.disease_stage}`);
-    if (extracted.biomarkers?.length) lines.push(`Biomarkers: ${extracted.biomarkers.join(", ")}`);
-    if (extracted.diagnosis_date) lines.push(`Diagnosis date: ${extracted.diagnosis_date}`);
-    if (extracted.city) lines.push(`City: ${extracted.city}`);
-    if (extracted.province) lines.push(`Province: ${extracted.province}`);
+    // Build summary of what was found
+    const found: string[] = [];
+    if (extracted.patient_name) found.push(`Patient name: ${extracted.patient_name}`);
+    if (extracted.age) found.push(`Age: ${extracted.age}`);
+    if (extracted.cancer_type) found.push(`Cancer type: ${extracted.cancer_type}`);
+    if (extracted.disease_stage) found.push(`Disease stage: ${extracted.disease_stage}`);
+    if (extracted.biomarkers?.length) found.push(`Biomarkers: ${extracted.biomarkers.join(", ")}`);
+    if (extracted.diagnosis_date) found.push(`Diagnosis date: ${extracted.diagnosis_date}`);
+    if (extracted.city) found.push(`City: ${extracted.city}`);
+    if (extracted.province) found.push(`Province: ${extracted.province}`);
 
-    const systemNote = `[REPORT UPLOADED] The following information was automatically extracted from the patient's uploaded medical report:\n${lines.join("\n")}\n\nPlease acknowledge this warmly, confirm what was found, and only ask for information that is still missing. Do not re-ask for fields that were already extracted.`;
-
-    // Inject as a system-level context message
-    this.history.push({ role: "user", content: systemNote });
-
-    // Build friendly summary of what was found vs what's missing
-    const found = lines.map(l => `✓ ${l}`).join("\n");
     const missing: string[] = [];
     if (!this.state.cancer_type) missing.push("Cancer type");
     if (!this.state.disease_stage) missing.push("Disease stage");
@@ -124,7 +193,12 @@ export class GroqChatService {
     if (!this.state.biomarkers) missing.push("Biomarkers");
     if (!this.state.diagnosis_date) missing.push("Diagnosis date");
 
-    return `${found}\n\nStill needed: ${missing.length > 0 ? missing.join(", ") : "Nothing — all details found!"}`;
+    // Inject context into LLM history so it knows what was extracted
+    const contextMsg = `[SYSTEM: Medical report uploaded and processed. Extracted fields:\n${found.join("\n")}\n\nStill missing: ${missing.length > 0 ? missing.join(", ") : "Nothing — all fields found!"}.\n\nPlease acknowledge what was found warmly, then only ask for missing fields one at a time.]`;
+
+    this.history.push({ role: "user", content: contextMsg });
+
+    return found.join("\n");
   }
 
   async sendMessage(userMessage: string): Promise<{
@@ -143,7 +217,7 @@ export class GroqChatService {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
+          model: CHAT_MODEL,
           messages: this.history,
           max_tokens: 400,
           temperature: 0.5,
@@ -233,8 +307,7 @@ export class GroqChatService {
       if (s === "ADVANCED" || s === "METASTATIC") s = "IV";
       if (s === "EARLY") s = "I";
       const map: Record<string, string> = { "1": "I", "2": "II", "3": "III", "4": "IV" };
-      s = map[s] || s;
-      this.state.disease_stage = `Stage ${s}`;
+      this.state.disease_stage = `Stage ${map[s] || s}`;
     }
     if (!this.state.disease_stage) {
       if (lower.includes("advanced")) this.state.disease_stage = "Stage IV";
