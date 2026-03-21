@@ -5,6 +5,7 @@ import { getRankedByBoth, getNearestTrials, getRankedTrials, calculateTrialSuita
 import { useAssistant } from "@/contexts/AssistantContext";
 import TrialResultCard from "./TrialResultCard";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Send, RotateCcw } from "lucide-react";
 
 interface ChatPanelProps {
