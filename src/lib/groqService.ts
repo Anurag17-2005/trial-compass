@@ -75,6 +75,79 @@ Does everything look correct? I'll find your matching trials once you confirm. �
 - "Do you know any of your biomarkers, like EGFR or PD-L1? It's fine to skip this."
 - "One last question — when were you first diagnosed? You can say something like 'about a year ago', give a year, or skip."`;
 
+// ── Geocode a city/province string to real lat/lng via Nominatim ──────────
+// Cache results to avoid repeated API calls for the same city
+const geocodeCache: Record<string, { latitude: number; longitude: number }> = {};
+
+export async function geocodeCity(city: string, province?: string): Promise<{ latitude: number; longitude: number }> {
+  const query = province ? `${city}, ${province}, Canada` : `${city}, Canada`;
+  const cacheKey = query.toLowerCase();
+
+  if (geocodeCache[cacheKey]) return geocodeCache[cacheKey];
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=ca`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "CancerTrialsCanada/1.0" },
+    });
+
+    if (!res.ok) throw new Error(`Nominatim error: ${res.status}`);
+
+    const data = await res.json();
+    if (data && data.length > 0) {
+      const coords = {
+        latitude: parseFloat(data[0].lat),
+        longitude: parseFloat(data[0].lon),
+      };
+      geocodeCache[cacheKey] = coords;
+      console.log(`Geocoded "${query}" → ${coords.latitude}, ${coords.longitude}`);
+      return coords;
+    }
+  } catch (err) {
+    console.warn("Geocoding failed, falling back to defaults:", err);
+  }
+
+  // Fallback to known coords if geocoding fails
+  return getFallbackCoords(city);
+}
+
+// Fallback hardcoded coords — only used if Nominatim is unreachable
+function getFallbackCoords(city: string): { latitude: number; longitude: number } {
+  const fallback: Record<string, { latitude: number; longitude: number }> = {
+    "Toronto": { latitude: 43.6532, longitude: -79.3832 },
+    "Vancouver": { latitude: 49.2827, longitude: -123.1207 },
+    "Montreal": { latitude: 45.5017, longitude: -73.5673 },
+    "Calgary": { latitude: 51.0447, longitude: -114.0719 },
+    "Edmonton": { latitude: 53.5461, longitude: -113.4938 },
+    "Ottawa": { latitude: 45.4215, longitude: -75.6972 },
+    "Hamilton": { latitude: 43.2557, longitude: -79.8711 },
+    "Winnipeg": { latitude: 49.8951, longitude: -97.1384 },
+    "Halifax": { latitude: 44.6488, longitude: -63.5752 },
+    "Saskatoon": { latitude: 52.1332, longitude: -106.6700 },
+    "Victoria": { latitude: 48.4284, longitude: -123.3656 },
+    "Kingston": { latitude: 44.2312, longitude: -76.4860 },
+    "London": { latitude: 42.9849, longitude: -81.2453 },
+    "Moncton": { latitude: 46.0878, longitude: -64.7782 },
+    "Quebec City": { latitude: 46.8139, longitude: -71.2080 },
+    "St. John's": { latitude: 47.5615, longitude: -52.7126 },
+    "Regina": { latitude: 50.4452, longitude: -104.6189 },
+    "Kelowna": { latitude: 49.8880, longitude: -119.4960 },
+    "Mississauga": { latitude: 43.5890, longitude: -79.6441 },
+    "Surrey": { latitude: 49.1913, longitude: -122.8490 },
+    "Burnaby": { latitude: 49.2488, longitude: -122.9805 },
+    "Richmond": { latitude: 49.1666, longitude: -123.1336 },
+    "Abbotsford": { latitude: 49.0504, longitude: -122.3045 },
+    "Barrie": { latitude: 44.3894, longitude: -79.6903 },
+    "Sudbury": { latitude: 46.4917, longitude: -80.9930 },
+    "Thunder Bay": { latitude: 48.3809, longitude: -89.2477 },
+    "Lethbridge": { latitude: 49.6956, longitude: -112.8451 },
+    "Red Deer": { latitude: 52.2681, longitude: -113.8112 },
+    "Sherbrooke": { latitude: 45.4042, longitude: -71.8929 },
+    "Saguenay": { latitude: 48.4280, longitude: -71.0545 },
+  };
+  return fallback[city] || { latitude: 56.1304, longitude: -106.3468 }; // Canada center
+}
+
 // ── Compress image using Canvas ────────────────────────────────────────────
 async function compressImageToBase64(imageSource: HTMLImageElement | HTMLCanvasElement): Promise<string> {
   const canvas = document.createElement("canvas");
@@ -106,69 +179,32 @@ async function compressImageToBase64(imageSource: HTMLImageElement | HTMLCanvasE
   return base64;
 }
 
-// ── Convert regular image file to compressed base64 ───────────────────────
 async function processImageFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = async () => {
       URL.revokeObjectURL(url);
-      try {
-        const base64 = await compressImageToBase64(img);
-        resolve(base64);
-      } catch (e) {
-        reject(e);
-      }
+      try { resolve(await compressImageToBase64(img)); } catch (e) { reject(e); }
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Failed to load image")); };
     img.src = url;
   });
 }
 
-// ── Convert first page of PDF to compressed base64 image via PDF.js ───────
-async function processPdfFile(file: File): Promise<string> {
-  // Dynamically load PDF.js from CDN (no npm install needed)
-  const pdfjsLib = await loadPdfJs();
-
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-
-  // Render first page only (contains the most important patient info)
-  const page = await pdf.getPage(1);
-  const viewport = page.getViewport({ scale: 1.5 }); // scale up for better OCR quality
-
-  const canvas = document.createElement("canvas");
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-  const ctx = canvas.getContext("2d")!;
-
-  await page.render({ canvasContext: ctx, viewport }).promise;
-
-  // Compress the rendered canvas
-  const base64 = await compressImageToBase64(canvas);
-  return base64;
-}
-
-// ── Lazy load PDF.js from CDN ─────────────────────────────────────────────
 let pdfjsLibCache: any = null;
 async function loadPdfJs(): Promise<any> {
   if (pdfjsLibCache) return pdfjsLibCache;
-
+  if ((window as any).pdfjsLib) {
+    pdfjsLibCache = (window as any).pdfjsLib;
+    return pdfjsLibCache;
+  }
   return new Promise((resolve, reject) => {
-    // Check if already loaded
-    if ((window as any).pdfjsLib) {
-      pdfjsLibCache = (window as any).pdfjsLib;
-      resolve(pdfjsLibCache);
-      return;
-    }
-
     const script = document.createElement("script");
     script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
     script.onload = () => {
       const lib = (window as any).pdfjsLib;
-      // Set worker source
-      lib.GlobalWorkerOptions.workerSrc =
-        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      lib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
       pdfjsLibCache = lib;
       resolve(lib);
     };
@@ -177,47 +213,44 @@ async function loadPdfJs(): Promise<any> {
   });
 }
 
-// ── Main extraction function — handles both images and PDFs ───────────────
+async function processPdfFile(file: File): Promise<string> {
+  const pdfjsLib = await loadPdfJs();
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1.5 });
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext("2d")!;
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return compressImageToBase64(canvas);
+}
+
 export async function extractProfileFromFile(file: File): Promise<Partial<ConversationState>> {
   const isPdf = file.type === "application/pdf";
   const isImage = file.type.startsWith("image/");
+  if (!isPdf && !isImage) throw new Error("Unsupported file type. Please upload a PDF or image.");
 
-  if (!isPdf && !isImage) {
-    throw new Error("Unsupported file type. Please upload a PDF or image.");
-  }
+  const base64 = isPdf ? await processPdfFile(file) : await processImageFile(file);
 
-  // Get base64 of the (possibly compressed/rendered) image
-  const base64 = isPdf
-    ? await processPdfFile(file)
-    : await processImageFile(file);
-
-  // Send to Groq vision
   const response = await fetch(GROQ_URL, {
     method: "POST",
-    headers: {
-      "Authorization": `Bearer ${GROQ_API_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: VISION_MODEL,
       max_tokens: 800,
       temperature: 0.1,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: `data:image/jpeg;base64,${base64}` },
-            },
-            {
-              type: "text",
-              text: `You are a medical data extractor. Look at this medical/pathology/lab report and extract patient information.
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } },
+          { type: "text", text: `You are a medical data extractor. Extract patient information from this medical/pathology/lab report.
 
-Return ONLY a valid JSON object with these exact keys. Use null if a field is not found.
+Return ONLY a valid JSON object. Use null if a field is not found.
 
 {
-  "patient_name": "full patient name as string or null",
+  "patient_name": "full patient name or null",
   "age": age as integer or null,
   "cancer_type": "one of: Lung, Breast, Colorectal, Prostate, Melanoma, Ovarian, Lymphoma, Pancreatic, Thyroid, Bladder, Kidney, Myeloma, Liver, Leukemia, Brain, Sarcoma, Gastric, Cervical, Endometrial, Head and Neck — or null",
   "disease_stage": "one of: Stage I, Stage II, Stage III, Stage IV — or null",
@@ -227,11 +260,9 @@ Return ONLY a valid JSON object with these exact keys. Use null if a field is no
   "province": "Canadian province full name or null"
 }
 
-Return ONLY the JSON. No explanation, no markdown, no extra text.`,
-            },
-          ],
-        },
-      ],
+Return ONLY the JSON. No explanation, no markdown, no extra text.` },
+        ],
+      }],
     }),
   });
 
@@ -299,9 +330,12 @@ export class GroqChatService {
     if (!this.state.biomarkers) missing.push("Biomarkers");
     if (!this.state.diagnosis_date) missing.push("Diagnosis date");
 
-    const contextMsg = `[SYSTEM: Medical report uploaded and ALL fields extracted successfully:\n${found.join("\n")}\n\nAll required fields are present. Please acknowledge warmly, then immediately show the confirmation summary table in the exact format specified, and ask the patient to confirm.]`;
-    this.history.push({ role: "user", content: contextMsg });
+    const allFound = missing.length === 0;
+    const contextMsg = allFound
+      ? `[SYSTEM: Medical report uploaded. ALL fields extracted:\n${found.join("\n")}\n\nAll required fields are present. Acknowledge warmly by name if available, then immediately show the confirmation summary table in the exact format specified in your instructions, and ask the patient to confirm.]`
+      : `[SYSTEM: Medical report uploaded. Extracted:\n${found.join("\n")}\nStill missing: ${missing.join(", ")}.\nAcknowledge warmly what was found, then ask for the first missing field only.]`;
 
+    this.history.push({ role: "user", content: contextMsg });
     return found.join("\n");
   }
 
@@ -316,29 +350,15 @@ export class GroqChatService {
     try {
       const res = await fetch(GROQ_URL, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${GROQ_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: CHAT_MODEL,
-          messages: this.history,
-          max_tokens: 400,
-          temperature: 0.5,
-        }),
+        headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: CHAT_MODEL, messages: this.history, max_tokens: 400, temperature: 0.5 }),
       });
-
       if (!res.ok) throw new Error(`Groq API error: ${res.status}`);
-
       const data = await res.json();
       const reply = data.choices?.[0]?.message?.content || "Could you try again?";
       this.history.push({ role: "assistant", content: reply });
       this.extractDiagnosisDateFromContext(userMessage);
-
-      const shouldSearch =
-        reply.includes("Let me search for matching trials now") ||
-        reply.includes("search for matching trials now");
-
+      const shouldSearch = reply.includes("Let me search for matching trials now") || reply.includes("search for matching trials now");
       return { response: reply, state: this.state, shouldSearch };
     } catch (error) {
       console.error("Groq error:", error);
@@ -397,6 +417,7 @@ export class GroqChatService {
     if (lower.includes("male") || lower.includes(" man")) this.state.sex = "Male";
     if (lower.includes("female") || lower.includes("woman")) this.state.sex = "Female";
 
+    // Extract city from message — broader matching for any Canadian city
     const cityMap: Record<string, { city: string; province: string }> = {
       "toronto": { city: "Toronto", province: "Ontario" }, "vancouver": { city: "Vancouver", province: "British Columbia" },
       "montreal": { city: "Montreal", province: "Quebec" }, "calgary": { city: "Calgary", province: "Alberta" },
@@ -408,6 +429,13 @@ export class GroqChatService {
       "quebec city": { city: "Quebec City", province: "Quebec" }, "st. john's": { city: "St. John's", province: "Newfoundland and Labrador" },
       "regina": { city: "Regina", province: "Saskatchewan" }, "kelowna": { city: "Kelowna", province: "British Columbia" },
       "mississauga": { city: "Mississauga", province: "Ontario" }, "surrey": { city: "Surrey", province: "British Columbia" },
+      "burnaby": { city: "Burnaby", province: "British Columbia" }, "richmond": { city: "Richmond", province: "British Columbia" },
+      "abbotsford": { city: "Abbotsford", province: "British Columbia" }, "barrie": { city: "Barrie", province: "Ontario" },
+      "sudbury": { city: "Sudbury", province: "Ontario" }, "thunder bay": { city: "Thunder Bay", province: "Ontario" },
+      "lethbridge": { city: "Lethbridge", province: "Alberta" }, "red deer": { city: "Red Deer", province: "Alberta" },
+      "sherbrooke": { city: "Sherbrooke", province: "Quebec" }, "saguenay": { city: "Saguenay", province: "Quebec" },
+      "fredericton": { city: "Fredericton", province: "New Brunswick" }, "charlottetown": { city: "Charlottetown", province: "Prince Edward Island" },
+      "whitehorse": { city: "Whitehorse", province: "Yukon" }, "yellowknife": { city: "Yellowknife", province: "Northwest Territories" },
     };
     for (const [key, val] of Object.entries(cityMap)) {
       if (lower.includes(key)) { this.state.city = val.city; if (!this.state.province) this.state.province = val.province; break; }
@@ -416,7 +444,8 @@ export class GroqChatService {
     const provinces: Record<string, string> = {
       "ontario": "Ontario", "quebec": "Quebec", "british columbia": "British Columbia", "bc": "British Columbia",
       "alberta": "Alberta", "manitoba": "Manitoba", "saskatchewan": "Saskatchewan", "nova scotia": "Nova Scotia",
-      "new brunswick": "New Brunswick", "newfoundland": "Newfoundland and Labrador",
+      "new brunswick": "New Brunswick", "newfoundland": "Newfoundland and Labrador", "pei": "Prince Edward Island",
+      "prince edward island": "Prince Edward Island", "yukon": "Yukon", "northwest territories": "Northwest Territories",
     };
     for (const [key, val] of Object.entries(provinces)) { if (lower.includes(key)) { this.state.province = val; break; } }
 
@@ -452,21 +481,12 @@ export class GroqChatService {
     return u;
   }
 
-  getCityCoordinates(): { latitude: number; longitude: number } {
-    const coords: Record<string, { latitude: number; longitude: number }> = {
-      "Toronto": { latitude: 43.6532, longitude: -79.3832 }, "Vancouver": { latitude: 49.2827, longitude: -123.1207 },
-      "Montreal": { latitude: 45.5017, longitude: -73.5673 }, "Calgary": { latitude: 51.0447, longitude: -114.0719 },
-      "Edmonton": { latitude: 53.5461, longitude: -113.4938 }, "Ottawa": { latitude: 45.4215, longitude: -75.6972 },
-      "Hamilton": { latitude: 43.2557, longitude: -79.8711 }, "Winnipeg": { latitude: 49.8951, longitude: -97.1384 },
-      "Halifax": { latitude: 44.6488, longitude: -63.5752 }, "Saskatoon": { latitude: 52.1332, longitude: -106.6700 },
-      "Victoria": { latitude: 48.4284, longitude: -123.3656 }, "Kingston": { latitude: 44.2312, longitude: -76.4860 },
-      "London": { latitude: 42.9849, longitude: -81.2453 }, "Moncton": { latitude: 46.0878, longitude: -64.7782 },
-      "Quebec City": { latitude: 46.8139, longitude: -71.2080 }, "St. John's": { latitude: 47.5615, longitude: -52.7126 },
-      "Regina": { latitude: 50.4452, longitude: -104.6189 }, "Kelowna": { latitude: 49.8880, longitude: -119.4960 },
-      "Mississauga": { latitude: 43.5890, longitude: -79.6441 }, "Surrey": { latitude: 49.1913, longitude: -122.8490 },
-    };
-    if (this.state.city && coords[this.state.city]) return coords[this.state.city];
-    return { latitude: 56.1304, longitude: -106.3468 };
+  // ── Now async — uses real geocoding ──────────────────────────────────────
+  async getCityCoordinates(): Promise<{ latitude: number; longitude: number }> {
+    if (this.state.city) {
+      return geocodeCity(this.state.city, this.state.province);
+    }
+    return { latitude: 56.1304, longitude: -106.3468 }; // Canada center
   }
 
   reset() {
