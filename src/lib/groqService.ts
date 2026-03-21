@@ -3,11 +3,12 @@ import { UserProfile } from "@/data/types";
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || "";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-// Two models:
-// - Vision: llama-4-scout for image/PDF extraction (multimodal)
-// - Chat:   llama-3.3-70b for conversation (fast, reliable)
 const VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 const CHAT_MODEL = "llama-3.3-70b-versatile";
+
+// Max dimensions and quality for image compression before sending to Groq
+const MAX_IMAGE_DIMENSION = 1024; // px — Groq vision works well at this size
+const JPEG_QUALITY = 0.8;         // 80% quality — good balance size vs clarity
 
 export interface ConversationMessage {
   role: "system" | "user" | "assistant";
@@ -75,11 +76,61 @@ Does everything look correct? I'll find your matching trials once you confirm. �
 - "Do you know any of your biomarkers, like EGFR or PD-L1? It's fine to skip this."
 - "One last question — when were you first diagnosed? You can say something like 'about a year ago', give a year, or skip."`;
 
+// ── Compress image using Canvas before sending to API ────────────────────
+async function compressImage(file: File): Promise<{ base64: string; mimeType: string }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      // Calculate new dimensions maintaining aspect ratio
+      let { width, height } = img;
+      if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+        if (width > height) {
+          height = Math.round((height * MAX_IMAGE_DIMENSION) / width);
+          width = MAX_IMAGE_DIMENSION;
+        } else {
+          width = Math.round((width * MAX_IMAGE_DIMENSION) / height);
+          height = MAX_IMAGE_DIMENSION;
+        }
+      }
+
+      // Draw to canvas at reduced size
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { reject(new Error("Canvas context unavailable")); return; }
+
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Export as JPEG (smaller than PNG) at 80% quality
+      const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+      const base64 = dataUrl.split(",")[1];
+
+      console.log(`Image compressed: ${width}x${height}px, ~${Math.round(base64.length * 0.75 / 1024)}KB`);
+      resolve({ base64, mimeType: "image/jpeg" });
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Failed to load image for compression"));
+    };
+
+    img.src = objectUrl;
+  });
+}
+
 // ── Extract profile from image using Groq vision model ────────────────────
 export async function extractProfileFromImageGroq(
-  base64Image: string,
-  mimeType: string
+  file: File
 ): Promise<Partial<ConversationState>> {
+  // Step 1: Compress the image to stay within API limits
+  const { base64, mimeType } = await compressImage(file);
+
+  // Step 2: Send compressed image to Groq vision
   const response = await fetch(GROQ_URL, {
     method: "POST",
     headers: {
@@ -88,8 +139,8 @@ export async function extractProfileFromImageGroq(
     },
     body: JSON.stringify({
       model: VISION_MODEL,
-      max_tokens: 1000,
-      temperature: 0.1, // low temp for accurate extraction
+      max_tokens: 800,
+      temperature: 0.1,
       messages: [
         {
           role: "user",
@@ -97,27 +148,27 @@ export async function extractProfileFromImageGroq(
             {
               type: "image_url",
               image_url: {
-                url: `data:${mimeType};base64,${base64Image}`,
+                url: `data:${mimeType};base64,${base64}`,
               },
             },
             {
               type: "text",
-              text: `You are a medical data extractor. Look at this medical/pathology/lab report image and extract the following information.
+              text: `You are a medical data extractor. Look at this medical/pathology/lab report image and extract information.
 
-Return ONLY a valid JSON object with these exact keys. Use null if a field is not found or unclear.
+Return ONLY a valid JSON object with these exact keys. Use null if a field is not found.
 
 {
   "patient_name": "full patient name as string or null",
-  "age": age as integer number or null,
-  "cancer_type": "one of: Lung, Breast, Colorectal, Prostate, Melanoma, Ovarian, Lymphoma, Pancreatic, Thyroid, Bladder, Kidney, Myeloma, Liver, Leukemia, Brain, Sarcoma, Gastric, Cervical, Endometrial, Head and Neck — or null if not found",
-  "disease_stage": "one of: Stage I, Stage II, Stage III, Stage IV — or null if not found",
-  "biomarkers": ["array of biomarker names found e.g. EGFR, PD-L1, KRAS, HER2, BRCA1, BRCA2, ALK, ROS1, BRAF — or empty array []"],
-  "diagnosis_date": "date or period as string e.g. '2023', 'March 2024', '6 months ago' — or null",
+  "age": age as integer or null,
+  "cancer_type": "one of: Lung, Breast, Colorectal, Prostate, Melanoma, Ovarian, Lymphoma, Pancreatic, Thyroid, Bladder, Kidney, Myeloma, Liver, Leukemia, Brain, Sarcoma, Gastric, Cervical, Endometrial, Head and Neck — or null",
+  "disease_stage": "one of: Stage I, Stage II, Stage III, Stage IV — or null",
+  "biomarkers": ["array of biomarker names e.g. EGFR, PD-L1, KRAS, HER2, BRCA1, BRCA2, ALK, ROS1, BRAF — empty array if none found"],
+  "diagnosis_date": "date or period as string e.g. '2023', 'March 2024' — or null",
   "city": "Canadian city name or null",
   "province": "Canadian province full name or null"
 }
 
-Return ONLY the JSON. No explanation, no markdown fences, no extra text.`,
+Return ONLY the JSON. No explanation, no markdown, no extra text.`,
             },
           ],
         },
@@ -132,8 +183,6 @@ Return ONLY the JSON. No explanation, no markdown fences, no extra text.`,
 
   const data = await response.json();
   const text = data.choices?.[0]?.message?.content || "{}";
-
-  // Clean and parse
   const clean = text.replace(/```json|```/g, "").trim();
   const parsed = JSON.parse(clean);
 
@@ -158,7 +207,6 @@ export class GroqChatService {
     this.history = [{ role: "system", content: SYSTEM_PROMPT }];
   }
 
-  // ── Inject extracted profile into state + LLM context ─────────────────
   injectExtractedProfile(extracted: Partial<ConversationState>): string {
     if (extracted.patient_name) this.state.patient_name = extracted.patient_name;
     if (extracted.age) this.state.age = extracted.age;
@@ -174,7 +222,6 @@ export class GroqChatService {
       this.state.age && (this.state.city || this.state.province)
     );
 
-    // Build summary of what was found
     const found: string[] = [];
     if (extracted.patient_name) found.push(`Patient name: ${extracted.patient_name}`);
     if (extracted.age) found.push(`Age: ${extracted.age}`);
@@ -193,9 +240,7 @@ export class GroqChatService {
     if (!this.state.biomarkers) missing.push("Biomarkers");
     if (!this.state.diagnosis_date) missing.push("Diagnosis date");
 
-    // Inject context into LLM history so it knows what was extracted
     const contextMsg = `[SYSTEM: Medical report uploaded and processed. Extracted fields:\n${found.join("\n")}\n\nStill missing: ${missing.length > 0 ? missing.join(", ") : "Nothing — all fields found!"}.\n\nPlease acknowledge what was found warmly, then only ask for missing fields one at a time.]`;
-
     this.history.push({ role: "user", content: contextMsg });
 
     return found.join("\n");
