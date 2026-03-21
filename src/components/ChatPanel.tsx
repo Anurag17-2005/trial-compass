@@ -3,7 +3,7 @@ import { ChatMessage, Trial, UserProfile } from "@/data/types";
 import { trials } from "@/data/trials";
 import { getRankedByBoth, getNearestTrials, getRankedTrials } from "@/lib/trialMatching";
 import { useAssistant } from "@/contexts/AssistantContext";
-import { ConversationState, extractProfileFromImageGroq } from "@/lib/groqService";
+import { ConversationState, extractProfileFromFile } from "@/lib/groqService";
 import TrialResultCard from "./TrialResultCard";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -56,14 +56,12 @@ function ProgressBar({ state, searchDone }: { state: ConversationState; searchDo
           {searchDone ? "✓ Matched" : `${pct}%`}
         </span>
       </div>
-
       <div className="relative h-1.5 bg-border rounded-full overflow-hidden mb-2">
         <div
           className="absolute left-0 top-0 h-full bg-primary rounded-full transition-all duration-500 ease-out"
           style={{ width: `${pct}%` }}
         />
       </div>
-
       <div className="flex items-center justify-between">
         {STEPS.map((step, idx) => {
           const done = currentStep > idx || searchDone;
@@ -77,24 +75,19 @@ function ProgressBar({ state, searchDone }: { state: ConversationState; searchDo
               }`}>
                 {done ? "✓" : step.icon}
               </div>
-              <span className={`text-[8px] font-medium leading-none text-center ${
-                done || active ? "text-primary" : "text-muted-foreground"
-              }`}>
+              <span className={`text-[8px] font-medium leading-none text-center ${done || active ? "text-primary" : "text-muted-foreground"}`}>
                 {step.label}
               </span>
             </div>
           );
         })}
-        {/* Results dot */}
         <div className="flex flex-col items-center gap-0.5" style={{ flex: 1 }}>
           <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold transition-all duration-300 ${
             searchDone ? "bg-emerald-500 text-white shadow-sm" : "bg-border text-muted-foreground"
           }`}>
             {searchDone ? "🎯" : "🔍"}
           </div>
-          <span className={`text-[8px] font-medium leading-none ${
-            searchDone ? "text-emerald-600" : "text-muted-foreground"
-          }`}>
+          <span className={`text-[8px] font-medium leading-none ${searchDone ? "text-emerald-600" : "text-muted-foreground"}`}>
             Results
           </span>
         </div>
@@ -105,10 +98,7 @@ function ProgressBar({ state, searchDone }: { state: ConversationState; searchDo
 
 // ── Confirmation table renderer ────────────────────────────────────────────
 function ConfirmationTable({ content }: { content: string }) {
-  const hasTable =
-    content.includes("| Detail |") ||
-    content.includes("|---|") ||
-    (content.includes("|") && content.includes("Cancer Type"));
+  const hasTable = content.includes("| Detail |") || content.includes("|---|") || (content.includes("|") && content.includes("Cancer Type"));
 
   if (!hasTable) {
     return (
@@ -131,33 +121,17 @@ function ConfirmationTable({ content }: { content: string }) {
       if (parts.length >= 2) tableRows.push({ detail: parts[0], value: parts[1] });
     } else if (inTable && !line.startsWith("|")) {
       inTable = false; passedTable = true; postText += lines[i] + "\n";
-    } else if (!inTable && !passedTable) {
-      preText += lines[i] + "\n";
-    } else if (passedTable) {
-      postText += lines[i] + "\n";
-    }
+    } else if (!inTable && !passedTable) { preText += lines[i] + "\n"; }
+    else if (passedTable) { postText += lines[i] + "\n"; }
   }
 
-  const iconMap: Record<string, string> = {
-    "Cancer Type": "🎗️", "Stage": "📊", "Age": "👤",
-    "Location": "📍", "Biomarkers": "🧬", "Diagnosis Date": "📅",
-  };
-  const colorMap: Record<string, string> = {
-    "Cancer Type": "bg-rose-50", "Stage": "bg-purple-50", "Age": "bg-blue-50",
-    "Location": "bg-teal-50", "Biomarkers": "bg-amber-50", "Diagnosis Date": "bg-indigo-50",
-  };
-  const borderMap: Record<string, string> = {
-    "Cancer Type": "border-l-rose-300", "Stage": "border-l-purple-300", "Age": "border-l-blue-300",
-    "Location": "border-l-teal-300", "Biomarkers": "border-l-amber-300", "Diagnosis Date": "border-l-indigo-300",
-  };
+  const iconMap: Record<string, string> = { "Cancer Type": "🎗️", "Stage": "📊", "Age": "👤", "Location": "📍", "Biomarkers": "🧬", "Diagnosis Date": "📅" };
+  const colorMap: Record<string, string> = { "Cancer Type": "bg-rose-50", "Stage": "bg-purple-50", "Age": "bg-blue-50", "Location": "bg-teal-50", "Biomarkers": "bg-amber-50", "Diagnosis Date": "bg-indigo-50" };
+  const borderMap: Record<string, string> = { "Cancer Type": "border-l-rose-300", "Stage": "border-l-purple-300", "Age": "border-l-blue-300", "Location": "border-l-teal-300", "Biomarkers": "border-l-amber-300", "Diagnosis Date": "border-l-indigo-300" };
 
   return (
     <div className="space-y-3">
-      {preText.trim() && (
-        <div className="text-sm prose prose-sm max-w-none [&>p]:m-0">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{preText.trim()}</ReactMarkdown>
-        </div>
-      )}
+      {preText.trim() && <div className="text-sm prose prose-sm max-w-none [&>p]:m-0"><ReactMarkdown remarkPlugins={[remarkGfm]}>{preText.trim()}</ReactMarkdown></div>}
       {tableRows.length > 0 && (
         <div className="rounded-xl border border-border overflow-hidden shadow-sm">
           <div className="bg-primary px-4 py-2.5">
@@ -169,20 +143,14 @@ function ConfirmationTable({ content }: { content: string }) {
                 <span className="text-lg w-7 flex-shrink-0">{iconMap[row.detail] || "•"}</span>
                 <div className="flex-1 flex items-center justify-between gap-2">
                   <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{row.detail}</span>
-                  <span className={`text-sm font-medium text-right ${row.value === "Not specified" ? "text-muted-foreground italic" : "text-foreground"}`}>
-                    {row.value}
-                  </span>
+                  <span className={`text-sm font-medium text-right ${row.value === "Not specified" ? "text-muted-foreground italic" : "text-foreground"}`}>{row.value}</span>
                 </div>
               </div>
             ))}
           </div>
         </div>
       )}
-      {postText.trim() && (
-        <div className="text-sm prose prose-sm max-w-none [&>p]:m-0">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{postText.trim()}</ReactMarkdown>
-        </div>
-      )}
+      {postText.trim() && <div className="text-sm prose prose-sm max-w-none [&>p]:m-0"><ReactMarkdown remarkPlugins={[remarkGfm]}>{postText.trim()}</ReactMarkdown></div>}
     </div>
   );
 }
@@ -190,34 +158,24 @@ function ConfirmationTable({ content }: { content: string }) {
 // ── Dynamic chips ──────────────────────────────────────────────────────────
 function getDynamicSuggestions(lastContent: string, hasAnyTrialResults: boolean): string[] {
   const c = lastContent.toLowerCase();
-
   if ((c.includes("|") && c.includes("cancer type")) || c.includes("does everything look correct") || c.includes("look correct") || c.includes("find your matching trials once you confirm") || c.includes("once you confirm"))
     return ["Yes, that's correct!", "I need to change something"];
-
   if (c.includes("what would you like to change") || c.includes("which detail"))
     return ["Change cancer type", "Change stage", "Change age", "Change location"];
-
   if (c.includes("what stage") || c.includes("which stage") || c.includes("stage has your") || c.includes("stage is your"))
     return ["Stage 1", "Stage 2", "Stage 3", "Stage 4"];
-
   if (c.includes("what type") || c.includes("type of cancer") || c.includes("start fresh") || c.includes("let's start") || c.includes("diagnosed with"))
     return ["Lung cancer", "Breast cancer", "Colorectal cancer", "Prostate cancer"];
-
   if (c.includes("how old") || c.includes("your age") || c.includes("old are you"))
     return ["I'm 35 years old", "I'm 45 years old", "I'm 55 years old", "I'm 65 years old"];
-
   if (c.includes("which city") || c.includes("city in canada") || c.includes("city are you") || (c.includes("located") && !c.includes("trial")))
     return ["I live in Toronto", "I live in Vancouver", "I live in Montreal", "I live in Calgary"];
-
   if (c.includes("biomarker") || c.includes("egfr") || c.includes("pd-l1") || c.includes("mutation"))
     return ["EGFR positive", "PD-L1 positive", "I don't know", "No biomarkers"];
-
   if (c.includes("when were you first") || c.includes("first diagnosed") || c.includes("how long ago") || c.includes("diagnosis date"))
     return ["About 3 months ago", "About 6 months ago", "About a year ago", "I'd rather not say"];
-
   if (hasAnyTrialResults)
     return ["Find nearest trials", "Show best matches", "Show recruiting trials", "Best and nearest"];
-
   return [];
 }
 
@@ -242,10 +200,7 @@ function detectNewSearchIntent(msg: string): boolean {
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
-const ChatPanel = ({
-  userProfile, onTrialsFound, onZoomToLocation,
-  onViewSummary, selectedTrialId
-}: ChatPanelProps) => {
+const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary, selectedTrialId }: ChatPanelProps) => {
   const { messages, setMessages, setUserProfile, setProfileReady, chatService, searchDone, setSearchDone, allFoundTrials, setAllFoundTrials } = useAssistant();
 
   const [input, setInput] = useState("");
@@ -267,10 +222,7 @@ const ChatPanel = ({
     if (selectedTrialId && trialCardRefs.current[selectedTrialId]) {
       trialCardRefs.current[selectedTrialId]?.scrollIntoView({ behavior: "smooth", block: "center" });
       const card = trialCardRefs.current[selectedTrialId];
-      if (card) {
-        card.style.boxShadow = "0 0 0 3px hsl(var(--primary))";
-        setTimeout(() => { card.style.boxShadow = ""; }, 2000);
-      }
+      if (card) { card.style.boxShadow = "0 0 0 3px hsl(var(--primary))"; setTimeout(() => { card.style.boxShadow = ""; }, 2000); }
     }
   }, [selectedTrialId]);
 
@@ -278,28 +230,17 @@ const ChatPanel = ({
     const coords = chatService.getCityCoordinates();
     const profileUpdates = chatService.buildUserProfile();
     const state = chatService.getState();
-    return {
-      ...(userProfile || {} as UserProfile),
-      ...profileUpdates,
-      latitude: coords.latitude,
-      longitude: coords.longitude,
-      location: `${state.city || ""}, ${state.province || ""}`,
-    };
+    return { ...(userProfile || {} as UserProfile), ...profileUpdates, latitude: coords.latitude, longitude: coords.longitude, location: `${state.city || ""}, ${state.province || ""}` };
   }, [chatService, userProfile]);
 
   const performTrialSearch = useCallback(() => {
     const state = chatService.getState();
     let found: Trial[] = trials.filter((t) => {
       if (state.cancer_type && !t.cancer_type.toLowerCase().includes(state.cancer_type.toLowerCase())) return false;
-      if (state.disease_stage) {
-        const stageNum = state.disease_stage.match(/[IViv]+$/)?.[0];
-        if (stageNum && !t.disease_stage.toUpperCase().includes(stageNum.toUpperCase())) return false;
-      }
+      if (state.disease_stage) { const s = state.disease_stage.match(/[IViv]+$/)?.[0]; if (s && !t.disease_stage.toUpperCase().includes(s.toUpperCase())) return false; }
       return true;
     });
-    if (found.length === 0 && state.cancer_type) {
-      found = trials.filter(t => t.cancer_type.toLowerCase().includes(state.cancer_type!.toLowerCase()));
-    }
+    if (found.length === 0 && state.cancer_type) found = trials.filter(t => t.cancer_type.toLowerCase().includes(state.cancer_type!.toLowerCase()));
     const updatedProfile = buildProfile();
     setUserProfile(updatedProfile);
     setProfileReady(true);
@@ -320,15 +261,15 @@ const ChatPanel = ({
     }
   }, [allFoundTrials]);
 
-  // ── File upload handler ────────────────────────────────────────────────
+  // ── File upload — accepts PDF and images ──────────────────────────────
   const handleFileUpload = async (file: File) => {
-    const allowedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-    // Note: PDFs need to be converted to images first for Groq vision
-    // For now accept images only; PDF support can be added with PDF.js later
-    if (!allowedTypes.includes(file.type)) {
+    const isPdf = file.type === "application/pdf";
+    const isImage = file.type.startsWith("image/");
+
+    if (!isPdf && !isImage) {
       setMessages(prev => [...prev, {
         id: Date.now().toString(), role: "assistant",
-        content: "Please upload an image of your report (JPG, PNG, GIF, or WebP). For PDFs, try taking a screenshot of the main page and uploading that.",
+        content: "Please upload a PDF or an image file (JPG, PNG, WebP) of your medical report.",
       }]);
       return;
     }
@@ -342,63 +283,49 @@ const ChatPanel = ({
     }]);
 
     try {
-      // Extract using Groq vision model (compression happens inside)
-      const extracted = await extractProfileFromImageGroq(file);
-
-      const foundFields = Object.keys(extracted).filter(k =>
-        extracted[k as keyof typeof extracted] !== undefined
-      );
+      const extracted = await extractProfileFromFile(file);
+      const foundFields = Object.keys(extracted).filter(k => extracted[k as keyof typeof extracted] !== undefined);
 
       if (foundFields.length === 0) {
         setMessages(prev => [...prev, {
           id: Date.now().toString(), role: "assistant",
-          content: "I wasn't able to extract medical information from this image. It may not be a pathology or lab report. Could you try a clearer image, or just tell me your details directly?",
+          content: "I wasn't able to extract medical information from this file. Please make sure it's a clear pathology or lab report. You can also type your details directly.",
         }]);
         setIsExtracting(false);
         setUploadedFileName(null);
         return;
       }
 
-      // Inject into groqService
       chatService.injectExtractedProfile(extracted);
       setConvState(chatService.getState());
 
-      // Update React userProfile state
       const profileUpdates = chatService.buildUserProfile();
       if (Object.keys(profileUpdates).length > 0) {
         const coords = chatService.getCityCoordinates();
         setUserProfile({ ...(userProfile || {} as UserProfile), ...profileUpdates, latitude: coords.latitude, longitude: coords.longitude });
       }
 
-      // Get LLM to acknowledge and ask for missing fields
       const result = await chatService.sendMessage("[Report processed, please acknowledge what was found and ask for missing fields]");
       setConvState(chatService.getState());
 
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(), role: "assistant",
-        content: result.response,
-      }]);
+      setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: result.response }]);
 
       if (result.shouldSearch) {
-        setSearchDone(false);
-        setAllFoundTrials([]);
+        setSearchDone(false); setAllFoundTrials([]);
         const { found } = performTrialSearch();
         setSearchDone(true);
         if (onTrialsFound) onTrialsFound(found);
         setMessages(prev => [...prev, {
           id: (Date.now() + 2).toString(), role: "assistant",
-          content: found.length > 0
-            ? `I found **${found.length} matching trial${found.length > 1 ? "s" : ""}** for you. Here are your best matches:`
-            : "No trials found matching your criteria.",
+          content: found.length > 0 ? `I found **${found.length} matching trial${found.length > 1 ? "s" : ""}** for you. Here are your best matches:` : "No trials found matching your criteria.",
           trials: found.length > 0 ? found : undefined,
         }]);
       }
-
     } catch (err) {
       console.error("Extraction error:", err);
       setMessages(prev => [...prev, {
         id: Date.now().toString(), role: "assistant",
-        content: "I had trouble reading that image. Please make sure it's a clear, well-lit photo of your medical report. You can also just type your details directly.",
+        content: "I had trouble reading that file. Please try a clearer image or a different PDF, or just type your details directly.",
       }]);
       setUploadedFileName(null);
     }
@@ -406,7 +333,6 @@ const ChatPanel = ({
     setIsExtracting(false);
   };
 
-  // ── Send message ───────────────────────────────────────────────────────
   const handleSend = async () => {
     if (!input.trim()) return;
     setMessages(prev => [...prev, { id: Date.now().toString(), role: "user", content: input }]);
@@ -430,42 +356,27 @@ const ChatPanel = ({
         }
       }
 
-      if (isNewSearch && searchDone) {
-        setSearchDone(false);
-        setAllFoundTrials([]);
-        if (onTrialsFound) onTrialsFound([]);
-      }
+      if (isNewSearch && searchDone) { setSearchDone(false); setAllFoundTrials([]); if (onTrialsFound) onTrialsFound([]); }
 
       const result = await chatService.sendMessage(currentInput);
       setConvState(chatService.getState());
 
       if (result.shouldSearch) {
-        setSearchDone(false);
-        setAllFoundTrials([]);
+        setSearchDone(false); setAllFoundTrials([]);
         const { found } = performTrialSearch();
         setSearchDone(true);
         if (onTrialsFound) onTrialsFound(found);
         setMessages(prev => [...prev,
           { id: (Date.now() + 1).toString(), role: "assistant", content: result.response },
-          {
-            id: (Date.now() + 2).toString(), role: "assistant",
-            content: found.length > 0
-              ? `I found **${found.length} matching trial${found.length > 1 ? "s" : ""}** for you. Here are your best matches:`
-              : "I couldn't find trials matching your criteria. Try broadening your search or clicking **Start over**.",
-            trials: found.length > 0 ? found : undefined,
-          }
+          { id: (Date.now() + 2).toString(), role: "assistant", content: found.length > 0 ? `I found **${found.length} matching trial${found.length > 1 ? "s" : ""}** for you. Here are your best matches:` : "I couldn't find trials matching your criteria. Try broadening your search or clicking **Start over**.", trials: found.length > 0 ? found : undefined },
         ]);
       } else {
         if (userProfile) {
           const profileUpdates = chatService.buildUserProfile();
           if (Object.keys(profileUpdates).length > 0) {
             const state = chatService.getState();
-            if (state.city) {
-              const coords = chatService.getCityCoordinates();
-              setUserProfile({ ...userProfile, ...profileUpdates, latitude: coords.latitude, longitude: coords.longitude });
-            } else {
-              setUserProfile({ ...userProfile, ...profileUpdates });
-            }
+            if (state.city) { const coords = chatService.getCityCoordinates(); setUserProfile({ ...userProfile, ...profileUpdates, latitude: coords.latitude, longitude: coords.longitude }); }
+            else setUserProfile({ ...userProfile, ...profileUpdates });
           }
         }
         setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: result.response }]);
@@ -474,22 +385,15 @@ const ChatPanel = ({
       console.error("Chat error:", error);
       setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: "Sorry, I'm having trouble connecting. Please try again." }]);
     }
-
     setIsTyping(false);
   };
 
   const handleReset = () => {
     chatService.reset();
-    setSearchDone(false);
-    setAllFoundTrials([]);
-    setConvState({ isComplete: false });
-    setUploadedFileName(null);
+    setSearchDone(false); setAllFoundTrials([]); setConvState({ isComplete: false }); setUploadedFileName(null);
     if (onTrialsFound) onTrialsFound([]);
     setProfileReady(false);
-    setMessages([{
-      id: "welcome", role: "assistant",
-      content: "Hi there! 👋 Let's start fresh. What type of cancer have you been diagnosed with?\n\nYou can also **📎 upload a photo of your pathology report** to auto-fill your details instantly.",
-    }]);
+    setMessages([{ id: "welcome", role: "assistant", content: "Hi there! 👋 I'm here to help you find clinical trials in Canada. I know navigating this can feel overwhelming, so I'll keep things simple. To start — what type of cancer have you been diagnosed with?" }]);
   };
 
   const lastAssistantMsg = [...messages].reverse().find(m => m.role === "assistant");
@@ -523,14 +427,10 @@ const ChatPanel = ({
         {messages.map((msg) => (
           <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
             {msg.role === "user" ? (
-              <div className="chat-bubble-user">
-                <p className="text-sm">{msg.content}</p>
-              </div>
+              <div className="chat-bubble-user"><p className="text-sm">{msg.content}</p></div>
             ) : (
               <div className="w-full max-w-md space-y-2">
-                <div className="chat-bubble-assistant">
-                  <ConfirmationTable content={msg.content} />
-                </div>
+                <div className="chat-bubble-assistant"><ConfirmationTable content={msg.content} /></div>
                 {msg.trials && msg.trials.length > 0 && msg.trials.map((trial) => (
                   <div key={trial.trial_id} ref={(el) => { trialCardRefs.current[trial.trial_id] = el; }}>
                     <TrialResultCard trial={trial} userProfile={userProfile} onViewDetails={onViewSummary} onZoomToLocation={onZoomToLocation} />
@@ -547,7 +447,9 @@ const ChatPanel = ({
               {isExtracting ? (
                 <div className="flex gap-2 items-center">
                   <Loader2 className="w-3 h-3 animate-spin text-primary" />
-                  <span className="text-xs text-muted-foreground">Reading your report with AI...</span>
+                  <span className="text-xs text-muted-foreground">
+                    Reading your report...
+                  </span>
                 </div>
               ) : (
                 <div className="flex gap-1">
@@ -562,37 +464,25 @@ const ChatPanel = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Upload status */}
+      {/* Uploaded file badge */}
       {uploadedFileName && !isExtracting && (
         <div className="mx-3 mb-1 flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700">
           <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
-          <span className="flex-1 truncate">Report loaded: {uploadedFileName}</span>
-          <button onClick={() => setUploadedFileName(null)}>
-            <X className="w-3 h-3 text-emerald-500 hover:text-emerald-700" />
-          </button>
+          <span className="flex-1 truncate">{uploadedFileName}</span>
+          <button onClick={() => setUploadedFileName(null)}><X className="w-3 h-3 text-emerald-500 hover:text-emerald-700" /></button>
         </div>
       )}
 
-      {/* Input */}
+      {/* Input area — single row, no duplicate banner */}
       <div className="p-3 border-t border-border space-y-2">
-        {/* Upload hint banner — only shown before search, no file yet */}
-        {!searchDone && !uploadedFileName && (
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-border text-xs text-muted-foreground hover:border-primary hover:text-primary hover:bg-primary/5 transition-all"
-          >
-            <Paperclip className="w-3.5 h-3.5 flex-shrink-0" />
-            <span>Upload a photo of your pathology report to auto-fill your details</span>
-          </button>
-        )}
-
         <div className="flex gap-2">
+          {/* Single upload button — only before search is done */}
           {!searchDone && (
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isExtracting}
-              title="Upload medical report image (JPG, PNG)"
-              className="rounded-full border border-border p-2.5 text-muted-foreground hover:text-primary hover:border-primary hover:bg-primary/5 transition-colors disabled:opacity-50"
+              title="Upload medical report (PDF or image)"
+              className="rounded-full border border-border p-2.5 text-muted-foreground hover:text-primary hover:border-primary hover:bg-primary/5 transition-colors disabled:opacity-50 flex-shrink-0"
             >
               {isExtracting
                 ? <Loader2 className="w-4 h-4 animate-spin" />
@@ -606,24 +496,25 @@ const ChatPanel = ({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && !isTyping && !isExtracting && handleSend()}
-            placeholder={searchDone ? "Ask about results or try a new cancer type..." : "Tell me about your condition..."}
+            placeholder={searchDone ? "Ask about results or try a new cancer type..." : "Type your details or upload a report 📎"}
             className="flex-1 rounded-full border border-input bg-background px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             disabled={isTyping || isExtracting}
           />
+
           <button
             onClick={handleSend}
             disabled={!input.trim() || isTyping || isExtracting}
-            className="rounded-full bg-primary text-primary-foreground p-2.5 disabled:opacity-50 hover:opacity-90 transition-opacity"
+            className="rounded-full bg-primary text-primary-foreground p-2.5 disabled:opacity-50 hover:opacity-90 transition-opacity flex-shrink-0"
           >
             <Send className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Hidden file input — images only for Groq vision */}
+        {/* Hidden file input — PDF + images */}
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/jpeg,image/png,image/gif,image/webp"
+          accept=".pdf,image/jpeg,image/png,image/gif,image/webp"
           className="hidden"
           onChange={(e) => {
             const file = e.target.files?.[0];
@@ -632,21 +523,16 @@ const ChatPanel = ({
           }}
         />
 
-        {/* Dynamic chips */}
+        {/* Dynamic suggestion chips */}
         <div className="flex gap-2 flex-wrap">
           {suggestions.map((s) => (
-            <button
-              key={s}
-              onClick={() => setInput(s)}
-              className="text-xs px-3 py-1.5 rounded-full border border-border text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-            >
+            <button key={s} onClick={() => setInput(s)}
+              className="text-xs px-3 py-1.5 rounded-full border border-border text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
               {s}
             </button>
           ))}
-          <button
-            onClick={handleReset}
-            className="text-xs px-3 py-1.5 rounded-full border border-border text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors flex items-center gap-1"
-          >
+          <button onClick={handleReset}
+            className="text-xs px-3 py-1.5 rounded-full border border-border text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors flex items-center gap-1">
             <RotateCcw className="w-3 h-3" />
             Start over
           </button>
