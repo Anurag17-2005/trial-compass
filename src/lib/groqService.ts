@@ -85,8 +85,8 @@ export class GroqChatService {
         body: JSON.stringify({
           model: "llama-3.3-70b-versatile",
           messages: this.history,
-          max_tokens: 150,
-          temperature: 0.7,
+          max_tokens: 300,
+          temperature: 0.6,
         }),
       });
 
