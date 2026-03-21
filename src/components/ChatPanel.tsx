@@ -342,16 +342,8 @@ const ChatPanel = ({
     }]);
 
     try {
-      // Convert to base64
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve((reader.result as string).split(",")[1]);
-        reader.onerror = () => reject(new Error("Failed to read file"));
-        reader.readAsDataURL(file);
-      });
-
-      // Extract using Groq vision model
-      const extracted = await extractProfileFromImageGroq(base64, file.type);
+      // Extract using Groq vision model (compression happens inside)
+      const extracted = await extractProfileFromImageGroq(file);
 
       const foundFields = Object.keys(extracted).filter(k =>
         extracted[k as keyof typeof extracted] !== undefined
