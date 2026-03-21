@@ -17,6 +17,7 @@ export interface ConversationState {
   province?: string;
   biomarkers?: string[];
   diagnosis_date?: string;
+  patient_name?: string;
   isComplete: boolean;
 }
 
@@ -59,6 +60,7 @@ Does everything look correct? I'll find your matching trials once you confirm. �
 - Do NOT proceed to search unless user explicitly confirms the table
 - If user wants to change something after the table, ask what to change, update it, show the table again
 - Never give medical advice — only help find trials
+- If a field was pre-filled from an uploaded report, acknowledge it warmly and skip asking for it
 
 ## TONE EXAMPLES:
 - "I'm sorry to hear that. What stage has your oncologist identified?"
@@ -74,6 +76,55 @@ export class GroqChatService {
 
   constructor() {
     this.history = [{ role: "system", content: SYSTEM_PROMPT }];
+  }
+
+  // ── NEW: inject profile extracted from uploaded report ─────────────────
+  injectExtractedProfile(extracted: Partial<ConversationState>): string {
+    // Merge extracted values into state
+    if (extracted.patient_name) this.state.patient_name = extracted.patient_name;
+    if (extracted.age) this.state.age = extracted.age;
+    if (extracted.cancer_type) this.state.cancer_type = extracted.cancer_type;
+    if (extracted.disease_stage) this.state.disease_stage = extracted.disease_stage;
+    if (extracted.biomarkers && extracted.biomarkers.length > 0) this.state.biomarkers = extracted.biomarkers;
+    if (extracted.diagnosis_date) this.state.diagnosis_date = extracted.diagnosis_date;
+    if (extracted.city) this.state.city = extracted.city;
+    if (extracted.province) this.state.province = extracted.province;
+
+    // Update completeness
+    this.state.isComplete = !!(
+      this.state.cancer_type &&
+      this.state.disease_stage &&
+      this.state.age &&
+      (this.state.city || this.state.province)
+    );
+
+    // Build a context message to inject into LLM history
+    const lines: string[] = [];
+    if (extracted.patient_name) lines.push(`Patient name: ${extracted.patient_name}`);
+    if (extracted.age) lines.push(`Age: ${extracted.age}`);
+    if (extracted.cancer_type) lines.push(`Cancer type: ${extracted.cancer_type}`);
+    if (extracted.disease_stage) lines.push(`Disease stage: ${extracted.disease_stage}`);
+    if (extracted.biomarkers?.length) lines.push(`Biomarkers: ${extracted.biomarkers.join(", ")}`);
+    if (extracted.diagnosis_date) lines.push(`Diagnosis date: ${extracted.diagnosis_date}`);
+    if (extracted.city) lines.push(`City: ${extracted.city}`);
+    if (extracted.province) lines.push(`Province: ${extracted.province}`);
+
+    const systemNote = `[REPORT UPLOADED] The following information was automatically extracted from the patient's uploaded medical report:\n${lines.join("\n")}\n\nPlease acknowledge this warmly, confirm what was found, and only ask for information that is still missing. Do not re-ask for fields that were already extracted.`;
+
+    // Inject as a system-level context message
+    this.history.push({ role: "user", content: systemNote });
+
+    // Build friendly summary of what was found vs what's missing
+    const found = lines.map(l => `✓ ${l}`).join("\n");
+    const missing: string[] = [];
+    if (!this.state.cancer_type) missing.push("Cancer type");
+    if (!this.state.disease_stage) missing.push("Disease stage");
+    if (!this.state.age) missing.push("Age");
+    if (!this.state.city && !this.state.province) missing.push("Location");
+    if (!this.state.biomarkers) missing.push("Biomarkers");
+    if (!this.state.diagnosis_date) missing.push("Diagnosis date");
+
+    return `${found}\n\nStill needed: ${missing.length > 0 ? missing.join(", ") : "Nothing — all details found!"}`;
   }
 
   async sendMessage(userMessage: string): Promise<{
@@ -109,11 +160,8 @@ export class GroqChatService {
       const reply = data.choices?.[0]?.message?.content || "Could you try again?";
 
       this.history.push({ role: "assistant", content: reply });
-
-      // Extract diagnosis date from assistant reply context if assistant acknowledges it
       this.extractDiagnosisDateFromContext(userMessage);
 
-      // VERY specific trigger — only this exact phrase fires the search
       const shouldSearch =
         reply.includes("Let me search for matching trials now") ||
         reply.includes("search for matching trials now");
@@ -131,72 +179,45 @@ export class GroqChatService {
 
   private extractDiagnosisDateFromContext(msg: string) {
     const lower = msg.toLowerCase();
-
-    // Skip phrases
     const skipPhrases = ["skip", "don't know", "not sure", "rather not", "prefer not", "no idea", "unsure"];
     if (skipPhrases.some(p => lower.includes(p))) {
-      if (!this.state.diagnosis_date) {
-        this.state.diagnosis_date = "Not specified";
-      }
+      if (!this.state.diagnosis_date) this.state.diagnosis_date = "Not specified";
       return;
     }
-
-    // Year patterns: "2022", "in 2023", "since 2021"
     const yearMatch = lower.match(/\b(20\d{2}|19\d{2})\b/);
-    if (yearMatch) {
-      this.state.diagnosis_date = yearMatch[1];
-      return;
-    }
-
-    // Relative patterns: "6 months ago", "a year ago", "last year", "recently"
+    if (yearMatch) { this.state.diagnosis_date = yearMatch[1]; return; }
     const relativePatterns = [
-      /(\d+)\s*months?\s*ago/i,
-      /(\d+)\s*years?\s*ago/i,
+      /(\d+)\s*months?\s*ago/i, /(\d+)\s*years?\s*ago/i,
       /about\s+(\d+)\s*(months?|years?)/i,
       /(last\s+year|recently|just\s+diagnosed|this\s+year)/i,
       /(a\s+few\s+months|a\s+few\s+years)/i,
     ];
     for (const pattern of relativePatterns) {
       const match = lower.match(pattern);
-      if (match) {
-        this.state.diagnosis_date = match[0];
-        return;
-      }
+      if (match) { this.state.diagnosis_date = match[0]; return; }
     }
-
-    // Month + year: "January 2023", "March last year"
     const monthMatch = lower.match(/(january|february|march|april|may|june|july|august|september|october|november|december)\s*(20\d{2})?/i);
-    if (monthMatch) {
-      this.state.diagnosis_date = monthMatch[0];
-      return;
-    }
+    if (monthMatch) { this.state.diagnosis_date = monthMatch[0]; }
   }
 
   private extractInfo(msg: string) {
     const lower = msg.toLowerCase();
 
-    // Detect change intent — clear the relevant field
     if (lower.includes("change") || lower.includes("update") || lower.includes("correct")) {
       if (lower.includes("stage")) this.state.disease_stage = undefined;
       if (lower.includes("age")) this.state.age = undefined;
       if (lower.includes("cancer") || lower.includes("type")) this.state.cancer_type = undefined;
-      if (lower.includes("city") || lower.includes("location")) {
-        this.state.city = undefined;
-        this.state.province = undefined;
-      }
+      if (lower.includes("city") || lower.includes("location")) { this.state.city = undefined; this.state.province = undefined; }
       if (lower.includes("biomarker")) this.state.biomarkers = undefined;
-      if (lower.includes("diagnosis") || lower.includes("date") || lower.includes("diagnosed")) {
-        this.state.diagnosis_date = undefined;
-      }
+      if (lower.includes("diagnosis") || lower.includes("date")) this.state.diagnosis_date = undefined;
       this.state.isComplete = false;
       return;
     }
 
-    // Cancer type
     const cancerTypes = [
       "lung", "breast", "brain", "colorectal", "colon", "prostate", "melanoma",
-      "ovarian", "lymphoma", "pancreatic", "thyroid", "bladder",
-      "kidney", "myeloma", "liver", "sarcoma", "leukemia", "head and neck",
+      "ovarian", "lymphoma", "pancreatic", "thyroid", "bladder", "kidney",
+      "myeloma", "liver", "sarcoma", "leukemia", "head and neck",
       "gastric", "stomach", "cervical", "endometrial", "biliary", "mesothelioma"
     ];
     for (const c of cancerTypes) {
@@ -206,7 +227,6 @@ export class GroqChatService {
       }
     }
 
-    // Stage
     const stageMatch = lower.match(/stage\s*(i{1,4}v?|[1-4]|iv|advanced|early|metastatic)/i);
     if (stageMatch) {
       let s = stageMatch[1].toUpperCase();
@@ -219,10 +239,9 @@ export class GroqChatService {
     if (!this.state.disease_stage) {
       if (lower.includes("advanced")) this.state.disease_stage = "Stage IV";
       if (lower.includes("metastatic")) this.state.disease_stage = "Stage IV";
-      if (lower.includes("early stage") || lower.includes("early-stage")) this.state.disease_stage = "Stage I";
+      if (lower.includes("early stage")) this.state.disease_stage = "Stage I";
     }
 
-    // Age
     const ageMatch =
       lower.match(/\b(\d{1,3})\s*(?:years?\s*old|yo|y\/o)\b/i) ||
       lower.match(/\b(?:i'm|i am|age|aged)\s*(\d{1,3})\b/i) ||
@@ -232,11 +251,9 @@ export class GroqChatService {
       if (age >= 18 && age <= 120) this.state.age = age;
     }
 
-    // Sex
-    if (lower.includes("male") || lower.includes(" man") || lower.includes("i'm a man")) this.state.sex = "Male";
-    if (lower.includes("female") || lower.includes("woman") || lower.includes("i'm a woman")) this.state.sex = "Female";
+    if (lower.includes("male") || lower.includes(" man")) this.state.sex = "Male";
+    if (lower.includes("female") || lower.includes("woman")) this.state.sex = "Female";
 
-    // City
     const cityMap: Record<string, { city: string; province: string }> = {
       "toronto": { city: "Toronto", province: "Ontario" },
       "vancouver": { city: "Vancouver", province: "British Columbia" },
@@ -257,7 +274,6 @@ export class GroqChatService {
       "regina": { city: "Regina", province: "Saskatchewan" },
       "kelowna": { city: "Kelowna", province: "British Columbia" },
       "mississauga": { city: "Mississauga", province: "Ontario" },
-      "brampton": { city: "Brampton", province: "Ontario" },
       "surrey": { city: "Surrey", province: "British Columbia" },
     };
     for (const [key, val] of Object.entries(cityMap)) {
@@ -268,22 +284,16 @@ export class GroqChatService {
       }
     }
 
-    // Province
     const provinces: Record<string, string> = {
       "ontario": "Ontario", "quebec": "Quebec", "british columbia": "British Columbia",
       "bc": "British Columbia", "alberta": "Alberta", "manitoba": "Manitoba",
       "saskatchewan": "Saskatchewan", "nova scotia": "Nova Scotia",
       "new brunswick": "New Brunswick", "newfoundland": "Newfoundland and Labrador",
-      "pei": "Prince Edward Island", "prince edward island": "Prince Edward Island",
     };
     for (const [key, val] of Object.entries(provinces)) {
-      if (lower.includes(key)) {
-        this.state.province = val;
-        break;
-      }
+      if (lower.includes(key)) { this.state.province = val; break; }
     }
 
-    // Biomarkers — handle "no" / "none" / "skip" etc.
     const noBiomarkers = ["no biomarkers", "no biomarker", "don't know", "skip", "none", "not sure", "no idea", "i don't have"];
     if (noBiomarkers.some(p => lower.includes(p))) {
       if (!this.state.biomarkers) this.state.biomarkers = [];
@@ -298,15 +308,11 @@ export class GroqChatService {
       }
     }
 
-    // Diagnosis date extraction
     this.extractDiagnosisDateFromContext(msg);
 
-    // isComplete is NOT used to trigger search anymore — only the LLM phrase does
     this.state.isComplete = !!(
-      this.state.cancer_type &&
-      this.state.disease_stage &&
-      this.state.age &&
-      (this.state.city || this.state.province)
+      this.state.cancer_type && this.state.disease_stage &&
+      this.state.age && (this.state.city || this.state.province)
     );
   }
 
@@ -314,6 +320,7 @@ export class GroqChatService {
 
   buildUserProfile(): Partial<UserProfile> {
     const updates: Partial<UserProfile> = {};
+    if (this.state.patient_name) updates.name = this.state.patient_name;
     if (this.state.cancer_type) updates.cancer_type = this.state.cancer_type;
     if (this.state.disease_stage) updates.disease_stage = this.state.disease_stage;
     if (this.state.age) updates.age = this.state.age;
