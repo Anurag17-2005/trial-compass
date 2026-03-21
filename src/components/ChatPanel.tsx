@@ -255,11 +255,51 @@ const ChatPanel = ({
     }]);
   };
 
-  // Dynamic suggestion chips based on reactive conversation state
+  // Dynamic suggestion chips based on reactive conversation state + last message context
   const getSuggestions = (): string[] => {
     if (searchDone) {
       return ["Find nearest trials", "Show best matches", "Show recruiting trials", "Best and nearest"];
     }
+
+    // Check last assistant message for context-aware suggestions
+    const lastAssistantMsg = [...messages].reverse().find(m => m.role === "assistant");
+    const lastContent = lastAssistantMsg?.content?.toLowerCase() || "";
+
+    // If confirming details, offer confirm/change options
+    const isConfirming = lastContent.includes("confirm") || 
+                         lastContent.includes("does that") ||
+                         lastContent.includes("look correct") ||
+                         lastContent.includes("shall i search") ||
+                         lastContent.includes("sound right");
+    if (isConfirming) {
+      return ["Yes, that's correct", "I need to change something"];
+    }
+
+    // If asking about stage (including re-asking after change request)
+    const isAskingStage = lastContent.includes("what stage") || lastContent.includes("which stage");
+    if (isAskingStage) {
+      return ["Stage 1", "Stage 2", "Stage 3", "Stage 4"];
+    }
+
+    // If asking about cancer type (including re-asking)
+    const isAskingType = lastContent.includes("what type") || lastContent.includes("which type") || lastContent.includes("diagnosed with");
+    if (isAskingType && convState.cancer_type) {
+      return ["Lung cancer", "Breast cancer", "Colorectal cancer", "Prostate cancer"];
+    }
+
+    // If asking about age
+    const isAskingAge = lastContent.includes("how old") || lastContent.includes("your age");
+    if (isAskingAge) {
+      return ["I'm 45 years old", "I'm 55 years old", "I'm 65 years old"];
+    }
+
+    // If asking about location
+    const isAskingLocation = lastContent.includes("which city") || lastContent.includes("where are you") || lastContent.includes("located");
+    if (isAskingLocation) {
+      return ["I live in Toronto", "I live in Vancouver", "I live in Montreal"];
+    }
+
+    // Default flow based on what's missing
     if (!convState.cancer_type) {
       return ["I have lung cancer", "I have breast cancer", "I have colorectal cancer"];
     }
