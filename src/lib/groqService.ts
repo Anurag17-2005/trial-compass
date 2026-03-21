@@ -85,10 +85,13 @@ export class GroqChatService {
       
       this.history.push({ role: "assistant", content: reply });
 
-      // Check if the AI said to search
-      const shouldSearch = this.state.isComplete || 
-        reply.toLowerCase().includes("search for matching trials") ||
-        reply.toLowerCase().includes("let me search");
+      // Only search AFTER user confirms — never on isComplete alone
+      const replyLower = reply.toLowerCase();
+      const shouldSearch = 
+        replyLower.includes("search for matching trials") ||
+        replyLower.includes("let me search") ||
+        replyLower.includes("searching for trials") ||
+        replyLower.includes("looking for trials now");
 
       return { response: reply, state: this.state, shouldSearch };
     } catch (error) {
