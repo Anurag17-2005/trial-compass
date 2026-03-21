@@ -6,9 +6,8 @@ const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 const CHAT_MODEL = "llama-3.3-70b-versatile";
 
-// Max dimensions and quality for image compression before sending to Groq
-const MAX_IMAGE_DIMENSION = 1024; // px — Groq vision works well at this size
-const JPEG_QUALITY = 0.8;         // 80% quality — good balance size vs clarity
+const MAX_IMAGE_DIMENSION = 1024;
+const JPEG_QUALITY = 0.82;
 
 export interface ConversationMessage {
   role: "system" | "user" | "assistant";
@@ -76,61 +75,123 @@ Does everything look correct? I'll find your matching trials once you confirm. �
 - "Do you know any of your biomarkers, like EGFR or PD-L1? It's fine to skip this."
 - "One last question — when were you first diagnosed? You can say something like 'about a year ago', give a year, or skip."`;
 
-// ── Compress image using Canvas before sending to API ────────────────────
-async function compressImage(file: File): Promise<{ base64: string; mimeType: string }> {
+// ── Compress image using Canvas ────────────────────────────────────────────
+async function compressImageToBase64(imageSource: HTMLImageElement | HTMLCanvasElement): Promise<string> {
+  const canvas = document.createElement("canvas");
+  const isImg = imageSource instanceof HTMLImageElement;
+  const srcWidth = isImg ? imageSource.naturalWidth : (imageSource as HTMLCanvasElement).width;
+  const srcHeight = isImg ? imageSource.naturalHeight : (imageSource as HTMLCanvasElement).height;
+
+  let width = srcWidth;
+  let height = srcHeight;
+
+  if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+    if (width > height) {
+      height = Math.round((height * MAX_IMAGE_DIMENSION) / width);
+      width = MAX_IMAGE_DIMENSION;
+    } else {
+      width = Math.round((width * MAX_IMAGE_DIMENSION) / height);
+      height = MAX_IMAGE_DIMENSION;
+    }
+  }
+
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(imageSource, 0, 0, width, height);
+
+  const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+  const base64 = dataUrl.split(",")[1];
+  console.log(`Compressed to ${width}x${height}px, ~${Math.round(base64.length * 0.75 / 1024)}KB`);
+  return base64;
+}
+
+// ── Convert regular image file to compressed base64 ───────────────────────
+async function processImageFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    const objectUrl = URL.createObjectURL(file);
-
-    img.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-
-      // Calculate new dimensions maintaining aspect ratio
-      let { width, height } = img;
-      if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
-        if (width > height) {
-          height = Math.round((height * MAX_IMAGE_DIMENSION) / width);
-          width = MAX_IMAGE_DIMENSION;
-        } else {
-          width = Math.round((width * MAX_IMAGE_DIMENSION) / height);
-          height = MAX_IMAGE_DIMENSION;
-        }
+    const url = URL.createObjectURL(file);
+    img.onload = async () => {
+      URL.revokeObjectURL(url);
+      try {
+        const base64 = await compressImageToBase64(img);
+        resolve(base64);
+      } catch (e) {
+        reject(e);
       }
-
-      // Draw to canvas at reduced size
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) { reject(new Error("Canvas context unavailable")); return; }
-
-      ctx.drawImage(img, 0, 0, width, height);
-
-      // Export as JPEG (smaller than PNG) at 80% quality
-      const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
-      const base64 = dataUrl.split(",")[1];
-
-      console.log(`Image compressed: ${width}x${height}px, ~${Math.round(base64.length * 0.75 / 1024)}KB`);
-      resolve({ base64, mimeType: "image/jpeg" });
     };
-
-    img.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("Failed to load image for compression"));
-    };
-
-    img.src = objectUrl;
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Failed to load image")); };
+    img.src = url;
   });
 }
 
-// ── Extract profile from image using Groq vision model ────────────────────
-export async function extractProfileFromImageGroq(
-  file: File
-): Promise<Partial<ConversationState>> {
-  // Step 1: Compress the image to stay within API limits
-  const { base64, mimeType } = await compressImage(file);
+// ── Convert first page of PDF to compressed base64 image via PDF.js ───────
+async function processPdfFile(file: File): Promise<string> {
+  // Dynamically load PDF.js from CDN (no npm install needed)
+  const pdfjsLib = await loadPdfJs();
 
-  // Step 2: Send compressed image to Groq vision
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+  // Render first page only (contains the most important patient info)
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1.5 }); // scale up for better OCR quality
+
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext("2d")!;
+
+  await page.render({ canvasContext: ctx, viewport }).promise;
+
+  // Compress the rendered canvas
+  const base64 = await compressImageToBase64(canvas);
+  return base64;
+}
+
+// ── Lazy load PDF.js from CDN ─────────────────────────────────────────────
+let pdfjsLibCache: any = null;
+async function loadPdfJs(): Promise<any> {
+  if (pdfjsLibCache) return pdfjsLibCache;
+
+  return new Promise((resolve, reject) => {
+    // Check if already loaded
+    if ((window as any).pdfjsLib) {
+      pdfjsLibCache = (window as any).pdfjsLib;
+      resolve(pdfjsLibCache);
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    script.onload = () => {
+      const lib = (window as any).pdfjsLib;
+      // Set worker source
+      lib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      pdfjsLibCache = lib;
+      resolve(lib);
+    };
+    script.onerror = () => reject(new Error("Failed to load PDF.js"));
+    document.head.appendChild(script);
+  });
+}
+
+// ── Main extraction function — handles both images and PDFs ───────────────
+export async function extractProfileFromFile(file: File): Promise<Partial<ConversationState>> {
+  const isPdf = file.type === "application/pdf";
+  const isImage = file.type.startsWith("image/");
+
+  if (!isPdf && !isImage) {
+    throw new Error("Unsupported file type. Please upload a PDF or image.");
+  }
+
+  // Get base64 of the (possibly compressed/rendered) image
+  const base64 = isPdf
+    ? await processPdfFile(file)
+    : await processImageFile(file);
+
+  // Send to Groq vision
   const response = await fetch(GROQ_URL, {
     method: "POST",
     headers: {
@@ -147,13 +208,11 @@ export async function extractProfileFromImageGroq(
           content: [
             {
               type: "image_url",
-              image_url: {
-                url: `data:${mimeType};base64,${base64}`,
-              },
+              image_url: { url: `data:image/jpeg;base64,${base64}` },
             },
             {
               type: "text",
-              text: `You are a medical data extractor. Look at this medical/pathology/lab report image and extract information.
+              text: `You are a medical data extractor. Look at this medical/pathology/lab report and extract patient information.
 
 Return ONLY a valid JSON object with these exact keys. Use null if a field is not found.
 
@@ -162,7 +221,7 @@ Return ONLY a valid JSON object with these exact keys. Use null if a field is no
   "age": age as integer or null,
   "cancer_type": "one of: Lung, Breast, Colorectal, Prostate, Melanoma, Ovarian, Lymphoma, Pancreatic, Thyroid, Bladder, Kidney, Myeloma, Liver, Leukemia, Brain, Sarcoma, Gastric, Cervical, Endometrial, Head and Neck — or null",
   "disease_stage": "one of: Stage I, Stage II, Stage III, Stage IV — or null",
-  "biomarkers": ["array of biomarker names e.g. EGFR, PD-L1, KRAS, HER2, BRCA1, BRCA2, ALK, ROS1, BRAF — empty array if none found"],
+  "biomarkers": ["array of biomarker names e.g. EGFR, PD-L1, KRAS, HER2, BRCA1, BRCA2, ALK, ROS1, BRAF — empty array [] if none"],
   "diagnosis_date": "date or period as string e.g. '2023', 'March 2024' — or null",
   "city": "Canadian city name or null",
   "province": "Canadian province full name or null"
@@ -240,7 +299,7 @@ export class GroqChatService {
     if (!this.state.biomarkers) missing.push("Biomarkers");
     if (!this.state.diagnosis_date) missing.push("Diagnosis date");
 
-    const contextMsg = `[SYSTEM: Medical report uploaded and processed. Extracted fields:\n${found.join("\n")}\n\nStill missing: ${missing.length > 0 ? missing.join(", ") : "Nothing — all fields found!"}.\n\nPlease acknowledge what was found warmly, then only ask for missing fields one at a time.]`;
+    const contextMsg = `[SYSTEM: Medical report uploaded. Extracted:\n${found.join("\n")}\nStill missing: ${missing.length > 0 ? missing.join(", ") : "nothing"}.\nAcknowledge warmly, then ask for missing fields one at a time.]`;
     this.history.push({ role: "user", content: contextMsg });
 
     return found.join("\n");
@@ -269,15 +328,10 @@ export class GroqChatService {
         }),
       });
 
-      if (!res.ok) {
-        const errText = await res.text();
-        console.error("Groq API error:", res.status, errText);
-        throw new Error(`Groq API error: ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`Groq API error: ${res.status}`);
 
       const data = await res.json();
       const reply = data.choices?.[0]?.message?.content || "Could you try again?";
-
       this.history.push({ role: "assistant", content: reply });
       this.extractDiagnosisDateFromContext(userMessage);
 
@@ -288,35 +342,20 @@ export class GroqChatService {
       return { response: reply, state: this.state, shouldSearch };
     } catch (error) {
       console.error("Groq error:", error);
-      return {
-        response: "I'm having a brief connection issue. Could you try sending that again?",
-        state: this.state,
-        shouldSearch: false,
-      };
+      return { response: "I'm having a brief connection issue. Could you try again?", state: this.state, shouldSearch: false };
     }
   }
 
   private extractDiagnosisDateFromContext(msg: string) {
     const lower = msg.toLowerCase();
     const skipPhrases = ["skip", "don't know", "not sure", "rather not", "prefer not", "no idea", "unsure"];
-    if (skipPhrases.some(p => lower.includes(p))) {
-      if (!this.state.diagnosis_date) this.state.diagnosis_date = "Not specified";
-      return;
-    }
+    if (skipPhrases.some(p => lower.includes(p))) { if (!this.state.diagnosis_date) this.state.diagnosis_date = "Not specified"; return; }
     const yearMatch = lower.match(/\b(20\d{2}|19\d{2})\b/);
     if (yearMatch) { this.state.diagnosis_date = yearMatch[1]; return; }
-    const relativePatterns = [
-      /(\d+)\s*months?\s*ago/i, /(\d+)\s*years?\s*ago/i,
-      /about\s+(\d+)\s*(months?|years?)/i,
-      /(last\s+year|recently|just\s+diagnosed|this\s+year)/i,
-      /(a\s+few\s+months|a\s+few\s+years)/i,
-    ];
-    for (const pattern of relativePatterns) {
-      const match = lower.match(pattern);
-      if (match) { this.state.diagnosis_date = match[0]; return; }
-    }
+    const patterns = [/(\d+)\s*months?\s*ago/i, /(\d+)\s*years?\s*ago/i, /about\s+(\d+)\s*(months?|years?)/i, /(last\s+year|recently|just\s+diagnosed|this\s+year)/i, /(a\s+few\s+months|a\s+few\s+years)/i];
+    for (const p of patterns) { const m = lower.match(p); if (m) { this.state.diagnosis_date = m[0]; return; } }
     const monthMatch = lower.match(/(january|february|march|april|may|june|july|august|september|october|november|december)\s*(20\d{2})?/i);
-    if (monthMatch) { this.state.diagnosis_date = monthMatch[0]; }
+    if (monthMatch) this.state.diagnosis_date = monthMatch[0];
   }
 
   private extractInfo(msg: string) {
@@ -333,17 +372,9 @@ export class GroqChatService {
       return;
     }
 
-    const cancerTypes = [
-      "lung", "breast", "brain", "colorectal", "colon", "prostate", "melanoma",
-      "ovarian", "lymphoma", "pancreatic", "thyroid", "bladder", "kidney",
-      "myeloma", "liver", "sarcoma", "leukemia", "head and neck",
-      "gastric", "stomach", "cervical", "endometrial", "biliary", "mesothelioma"
-    ];
+    const cancerTypes = ["lung", "breast", "brain", "colorectal", "colon", "prostate", "melanoma", "ovarian", "lymphoma", "pancreatic", "thyroid", "bladder", "kidney", "myeloma", "liver", "sarcoma", "leukemia", "head and neck", "gastric", "stomach", "cervical", "endometrial", "biliary", "mesothelioma"];
     for (const c of cancerTypes) {
-      if (lower.includes(c)) {
-        this.state.cancer_type = c === "colon" ? "Colorectal" : c.charAt(0).toUpperCase() + c.slice(1);
-        break;
-      }
+      if (lower.includes(c)) { this.state.cancer_type = c === "colon" ? "Colorectal" : c.charAt(0).toUpperCase() + c.slice(1); break; }
     }
 
     const stageMatch = lower.match(/stage\s*(i{1,4}v?|[1-4]|iv|advanced|early|metastatic)/i);
@@ -360,116 +391,79 @@ export class GroqChatService {
       if (lower.includes("early stage")) this.state.disease_stage = "Stage I";
     }
 
-    const ageMatch =
-      lower.match(/\b(\d{1,3})\s*(?:years?\s*old|yo|y\/o)\b/i) ||
-      lower.match(/\b(?:i'm|i am|age|aged)\s*(\d{1,3})\b/i) ||
-      lower.match(/\b(\d{2})\s*(?:year|yr)\b/i);
-    if (ageMatch) {
-      const age = parseInt(ageMatch[1]);
-      if (age >= 18 && age <= 120) this.state.age = age;
-    }
+    const ageMatch = lower.match(/\b(\d{1,3})\s*(?:years?\s*old|yo|y\/o)\b/i) || lower.match(/\b(?:i'm|i am|age|aged)\s*(\d{1,3})\b/i) || lower.match(/\b(\d{2})\s*(?:year|yr)\b/i);
+    if (ageMatch) { const age = parseInt(ageMatch[1]); if (age >= 18 && age <= 120) this.state.age = age; }
 
     if (lower.includes("male") || lower.includes(" man")) this.state.sex = "Male";
     if (lower.includes("female") || lower.includes("woman")) this.state.sex = "Female";
 
     const cityMap: Record<string, { city: string; province: string }> = {
-      "toronto": { city: "Toronto", province: "Ontario" },
-      "vancouver": { city: "Vancouver", province: "British Columbia" },
-      "montreal": { city: "Montreal", province: "Quebec" },
-      "calgary": { city: "Calgary", province: "Alberta" },
-      "edmonton": { city: "Edmonton", province: "Alberta" },
-      "ottawa": { city: "Ottawa", province: "Ontario" },
-      "hamilton": { city: "Hamilton", province: "Ontario" },
-      "winnipeg": { city: "Winnipeg", province: "Manitoba" },
-      "halifax": { city: "Halifax", province: "Nova Scotia" },
-      "saskatoon": { city: "Saskatoon", province: "Saskatchewan" },
-      "victoria": { city: "Victoria", province: "British Columbia" },
-      "kingston": { city: "Kingston", province: "Ontario" },
-      "london": { city: "London", province: "Ontario" },
-      "moncton": { city: "Moncton", province: "New Brunswick" },
-      "quebec city": { city: "Quebec City", province: "Quebec" },
-      "st. john's": { city: "St. John's", province: "Newfoundland and Labrador" },
-      "regina": { city: "Regina", province: "Saskatchewan" },
-      "kelowna": { city: "Kelowna", province: "British Columbia" },
-      "mississauga": { city: "Mississauga", province: "Ontario" },
-      "surrey": { city: "Surrey", province: "British Columbia" },
+      "toronto": { city: "Toronto", province: "Ontario" }, "vancouver": { city: "Vancouver", province: "British Columbia" },
+      "montreal": { city: "Montreal", province: "Quebec" }, "calgary": { city: "Calgary", province: "Alberta" },
+      "edmonton": { city: "Edmonton", province: "Alberta" }, "ottawa": { city: "Ottawa", province: "Ontario" },
+      "hamilton": { city: "Hamilton", province: "Ontario" }, "winnipeg": { city: "Winnipeg", province: "Manitoba" },
+      "halifax": { city: "Halifax", province: "Nova Scotia" }, "saskatoon": { city: "Saskatoon", province: "Saskatchewan" },
+      "victoria": { city: "Victoria", province: "British Columbia" }, "kingston": { city: "Kingston", province: "Ontario" },
+      "london": { city: "London", province: "Ontario" }, "moncton": { city: "Moncton", province: "New Brunswick" },
+      "quebec city": { city: "Quebec City", province: "Quebec" }, "st. john's": { city: "St. John's", province: "Newfoundland and Labrador" },
+      "regina": { city: "Regina", province: "Saskatchewan" }, "kelowna": { city: "Kelowna", province: "British Columbia" },
+      "mississauga": { city: "Mississauga", province: "Ontario" }, "surrey": { city: "Surrey", province: "British Columbia" },
     };
     for (const [key, val] of Object.entries(cityMap)) {
-      if (lower.includes(key)) {
-        this.state.city = val.city;
-        if (!this.state.province) this.state.province = val.province;
-        break;
-      }
+      if (lower.includes(key)) { this.state.city = val.city; if (!this.state.province) this.state.province = val.province; break; }
     }
 
     const provinces: Record<string, string> = {
-      "ontario": "Ontario", "quebec": "Quebec", "british columbia": "British Columbia",
-      "bc": "British Columbia", "alberta": "Alberta", "manitoba": "Manitoba",
-      "saskatchewan": "Saskatchewan", "nova scotia": "Nova Scotia",
+      "ontario": "Ontario", "quebec": "Quebec", "british columbia": "British Columbia", "bc": "British Columbia",
+      "alberta": "Alberta", "manitoba": "Manitoba", "saskatchewan": "Saskatchewan", "nova scotia": "Nova Scotia",
       "new brunswick": "New Brunswick", "newfoundland": "Newfoundland and Labrador",
     };
-    for (const [key, val] of Object.entries(provinces)) {
-      if (lower.includes(key)) { this.state.province = val; break; }
-    }
+    for (const [key, val] of Object.entries(provinces)) { if (lower.includes(key)) { this.state.province = val; break; } }
 
     const noBiomarkers = ["no biomarkers", "no biomarker", "don't know", "skip", "none", "not sure", "no idea", "i don't have"];
     if (noBiomarkers.some(p => lower.includes(p))) {
       if (!this.state.biomarkers) this.state.biomarkers = [];
     } else {
-      const biomarkerKeywords = ["egfr", "alk", "ros1", "braf", "kras", "pd-l1", "her2", "brca", "btk", "bcl-2", "mss", "msi", "folr1", "ret", "fgfr", "ntrk", "met", "lag-3"];
-      for (const b of biomarkerKeywords) {
+      const bms = ["egfr", "alk", "ros1", "braf", "kras", "pd-l1", "her2", "brca", "btk", "bcl-2", "mss", "msi", "folr1", "ret", "fgfr", "ntrk", "met", "lag-3"];
+      for (const b of bms) {
         if (lower.includes(b)) {
           if (!this.state.biomarkers) this.state.biomarkers = [];
-          const formatted = b.toUpperCase();
-          if (!this.state.biomarkers.includes(formatted)) this.state.biomarkers.push(formatted);
+          const f = b.toUpperCase();
+          if (!this.state.biomarkers.includes(f)) this.state.biomarkers.push(f);
         }
       }
     }
 
     this.extractDiagnosisDateFromContext(msg);
-
-    this.state.isComplete = !!(
-      this.state.cancer_type && this.state.disease_stage &&
-      this.state.age && (this.state.city || this.state.province)
-    );
+    this.state.isComplete = !!(this.state.cancer_type && this.state.disease_stage && this.state.age && (this.state.city || this.state.province));
   }
 
   getState(): ConversationState { return this.state; }
 
   buildUserProfile(): Partial<UserProfile> {
-    const updates: Partial<UserProfile> = {};
-    if (this.state.patient_name) updates.name = this.state.patient_name;
-    if (this.state.cancer_type) updates.cancer_type = this.state.cancer_type;
-    if (this.state.disease_stage) updates.disease_stage = this.state.disease_stage;
-    if (this.state.age) updates.age = this.state.age;
-    if (this.state.city) updates.city = this.state.city;
-    if (this.state.province) updates.province = this.state.province;
-    if (this.state.biomarkers) updates.biomarkers = this.state.biomarkers;
-    return updates;
+    const u: Partial<UserProfile> = {};
+    if (this.state.patient_name) u.name = this.state.patient_name;
+    if (this.state.cancer_type) u.cancer_type = this.state.cancer_type;
+    if (this.state.disease_stage) u.disease_stage = this.state.disease_stage;
+    if (this.state.age) u.age = this.state.age;
+    if (this.state.city) u.city = this.state.city;
+    if (this.state.province) u.province = this.state.province;
+    if (this.state.biomarkers) u.biomarkers = this.state.biomarkers;
+    return u;
   }
 
   getCityCoordinates(): { latitude: number; longitude: number } {
     const coords: Record<string, { latitude: number; longitude: number }> = {
-      "Toronto": { latitude: 43.6532, longitude: -79.3832 },
-      "Vancouver": { latitude: 49.2827, longitude: -123.1207 },
-      "Montreal": { latitude: 45.5017, longitude: -73.5673 },
-      "Calgary": { latitude: 51.0447, longitude: -114.0719 },
-      "Edmonton": { latitude: 53.5461, longitude: -113.4938 },
-      "Ottawa": { latitude: 45.4215, longitude: -75.6972 },
-      "Hamilton": { latitude: 43.2557, longitude: -79.8711 },
-      "Winnipeg": { latitude: 49.8951, longitude: -97.1384 },
-      "Halifax": { latitude: 44.6488, longitude: -63.5752 },
-      "Saskatoon": { latitude: 52.1332, longitude: -106.6700 },
-      "Victoria": { latitude: 48.4284, longitude: -123.3656 },
-      "Kingston": { latitude: 44.2312, longitude: -76.4860 },
-      "London": { latitude: 42.9849, longitude: -81.2453 },
-      "Moncton": { latitude: 46.0878, longitude: -64.7782 },
-      "Quebec City": { latitude: 46.8139, longitude: -71.2080 },
-      "St. John's": { latitude: 47.5615, longitude: -52.7126 },
-      "Regina": { latitude: 50.4452, longitude: -104.6189 },
-      "Kelowna": { latitude: 49.8880, longitude: -119.4960 },
-      "Mississauga": { latitude: 43.5890, longitude: -79.6441 },
-      "Surrey": { latitude: 49.1913, longitude: -122.8490 },
+      "Toronto": { latitude: 43.6532, longitude: -79.3832 }, "Vancouver": { latitude: 49.2827, longitude: -123.1207 },
+      "Montreal": { latitude: 45.5017, longitude: -73.5673 }, "Calgary": { latitude: 51.0447, longitude: -114.0719 },
+      "Edmonton": { latitude: 53.5461, longitude: -113.4938 }, "Ottawa": { latitude: 45.4215, longitude: -75.6972 },
+      "Hamilton": { latitude: 43.2557, longitude: -79.8711 }, "Winnipeg": { latitude: 49.8951, longitude: -97.1384 },
+      "Halifax": { latitude: 44.6488, longitude: -63.5752 }, "Saskatoon": { latitude: 52.1332, longitude: -106.6700 },
+      "Victoria": { latitude: 48.4284, longitude: -123.3656 }, "Kingston": { latitude: 44.2312, longitude: -76.4860 },
+      "London": { latitude: 42.9849, longitude: -81.2453 }, "Moncton": { latitude: 46.0878, longitude: -64.7782 },
+      "Quebec City": { latitude: 46.8139, longitude: -71.2080 }, "St. John's": { latitude: 47.5615, longitude: -52.7126 },
+      "Regina": { latitude: 50.4452, longitude: -104.6189 }, "Kelowna": { latitude: 49.8880, longitude: -119.4960 },
+      "Mississauga": { latitude: 43.5890, longitude: -79.6441 }, "Surrey": { latitude: 49.1913, longitude: -122.8490 },
     };
     if (this.state.city && coords[this.state.city]) return coords[this.state.city];
     return { latitude: 56.1304, longitude: -106.3468 };
