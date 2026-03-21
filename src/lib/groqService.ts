@@ -299,7 +299,7 @@ export class GroqChatService {
     if (!this.state.biomarkers) missing.push("Biomarkers");
     if (!this.state.diagnosis_date) missing.push("Diagnosis date");
 
-    const contextMsg = `[SYSTEM: Medical report uploaded. Extracted:\n${found.join("\n")}\nStill missing: ${missing.length > 0 ? missing.join(", ") : "nothing"}.\nAcknowledge warmly, then ask for missing fields one at a time.]`;
+    const contextMsg = `[SYSTEM: Medical report uploaded and ALL fields extracted successfully:\n${found.join("\n")}\n\nAll required fields are present. Please acknowledge warmly, then immediately show the confirmation summary table in the exact format specified, and ask the patient to confirm.]`;
     this.history.push({ role: "user", content: contextMsg });
 
     return found.join("\n");
