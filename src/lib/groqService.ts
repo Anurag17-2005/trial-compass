@@ -20,42 +20,52 @@ export interface ConversationState {
   isComplete: boolean;
 }
 
-const SYSTEM_PROMPT = `You are a compassionate clinical trial navigator helping patients find trials in Canada. You speak like a warm, professional nurse taking an intake — brief but human.
+const SYSTEM_PROMPT = `You are a compassionate clinical trial navigator helping patients find trials in Canada. You speak like a warm, professional nurse — brief, human, and clear.
 
-RULES:
-- Ask ONE question at a time
-- Keep replies to 1-2 short sentences max
-- Add a brief, genuine empathetic touch (one line) when appropriate — e.g. "I understand this can feel overwhelming." or "Thank you for sharing that with me." Don't overdo it.
-- Collect in this order: cancer type → stage → age → location (city, province) → biomarkers  → diagnosis date -> confirmation summary -> let see . 
-- For biomarkers and diagnosis date: if user says "no", "don't know", or "skip", move on immediately
-- After each answer, briefly acknowledge then ask the next question
-- When user wants to change previously given info, clear the old value and ask for the new one
-- CRITICAL CONFIRMATION STEP:
-  Once you have at minimum: cancer type + stage + age + location, you MUST present a confirmation summary. Format it EXACTLY like this (use this exact structure with the pipe-separated table):
+## STRICT COLLECTION ORDER (follow exactly, one question at a time):
+1. Cancer type
+2. Disease stage
+3. Age
+4. Location (city + province)
+5. Biomarkers — if user says "no", "don't know", "skip", "none" → set to "Not specified" and move on
+6. Diagnosis date — ask "When were you first diagnosed? You can say something like 'about 6 months ago' or give a year — or skip if you'd prefer."
+   If user skips → set to "Not specified" and move on
+7. CONFIRMATION TABLE — once you have cancer type + stage + age + location, show this EXACT format:
 
-"Here's what I have:
+---
+Here's a summary of your details:
 
 | Detail | Value |
-|--------|-------|
-| Cancer Type | [type] |
-| Stage | [stage] |
-| Age | [age] |
+|---|---|
+| Cancer Type | [value] |
+| Stage | [value] |
+| Age | [value] |
 | Location | [city, province] |
-| Biomarkers | [biomarkers or Not specified] |
+| Biomarkers | [value or Not specified] |
+| Diagnosis Date | [value or Not specified] |
 
-Does everything look correct? I'll search for matching trials once you confirm."
+Does everything look correct? I'll find your matching trials once you confirm. ✓
+---
 
-- You MUST wait for explicit confirmation (yes/correct/looks good/that's right) before searching
-- Do NOT search until the user confirms
-- Only after user confirms, respond with EXACTLY: "Let me search for matching trials now."
-- If user says something is wrong during confirmation, ask what to change, update it, then show the table again
-- Never give medical advice. You help find trials only.
-- If user asks off-topic questions, gently redirect to trial search
+8. WAIT for user to confirm (yes / looks good / correct / that's right / proceed)
+9. Only after confirmed, reply EXACTLY with this phrase and nothing else:
+   "Perfect! Let me search for matching trials now. 🔍"
 
-TONE EXAMPLES:
-- "I appreciate you sharing that. What stage has your oncologist identified?"
-- "Got it, stage 3. And how old are you, if you don't mind me asking?"
-- "Thank you. Which city in Canada are you based in?"`;
+## CRITICAL RULES:
+- Ask ONLY ONE question per message
+- Do NOT skip step 6 (diagnosis date) — it must be asked after biomarkers
+- Do NOT show the confirmation table until BOTH biomarkers AND diagnosis date have been answered (or skipped)
+- Do NOT include the phrase "search for matching trials" anywhere except step 9
+- Do NOT proceed to search unless user explicitly confirms the table
+- If user wants to change something after the table, ask what to change, update it, show the table again
+- Never give medical advice — only help find trials
+
+## TONE EXAMPLES:
+- "I'm sorry to hear that. What stage has your oncologist identified?"
+- "Got it, stage III. How old are you, if you don't mind?"
+- "Thank you. Which city in Canada are you located in?"
+- "Do you know any of your biomarkers, like EGFR or PD-L1? It's fine to skip this."
+- "One last question — when were you first diagnosed? You can say something like 'about a year ago', give a year, or skip."`;
 
 
 export class GroqChatService {
@@ -84,8 +94,8 @@ export class GroqChatService {
         body: JSON.stringify({
           model: "llama-3.3-70b-versatile",
           messages: this.history,
-          max_tokens: 300,
-          temperature: 0.6,
+          max_tokens: 400,
+          temperature: 0.5,
         }),
       });
 
@@ -97,16 +107,16 @@ export class GroqChatService {
 
       const data = await res.json();
       const reply = data.choices?.[0]?.message?.content || "Could you try again?";
-      
+
       this.history.push({ role: "assistant", content: reply });
 
-      // Only search AFTER user confirms — never on isComplete alone
-      const replyLower = reply.toLowerCase();
-      const shouldSearch = 
-        replyLower.includes("search for matching trials") ||
-        replyLower.includes("let me search") ||
-        replyLower.includes("searching for trials") ||
-        replyLower.includes("looking for trials now");
+      // Extract diagnosis date from assistant reply context if assistant acknowledges it
+      this.extractDiagnosisDateFromContext(userMessage);
+
+      // VERY specific trigger — only this exact phrase fires the search
+      const shouldSearch =
+        reply.includes("Let me search for matching trials now") ||
+        reply.includes("search for matching trials now");
 
       return { response: reply, state: this.state, shouldSearch };
     } catch (error) {
@@ -119,10 +129,53 @@ export class GroqChatService {
     }
   }
 
+  private extractDiagnosisDateFromContext(msg: string) {
+    const lower = msg.toLowerCase();
+
+    // Skip phrases
+    const skipPhrases = ["skip", "don't know", "not sure", "rather not", "prefer not", "no idea", "unsure"];
+    if (skipPhrases.some(p => lower.includes(p))) {
+      if (!this.state.diagnosis_date) {
+        this.state.diagnosis_date = "Not specified";
+      }
+      return;
+    }
+
+    // Year patterns: "2022", "in 2023", "since 2021"
+    const yearMatch = lower.match(/\b(20\d{2}|19\d{2})\b/);
+    if (yearMatch) {
+      this.state.diagnosis_date = yearMatch[1];
+      return;
+    }
+
+    // Relative patterns: "6 months ago", "a year ago", "last year", "recently"
+    const relativePatterns = [
+      /(\d+)\s*months?\s*ago/i,
+      /(\d+)\s*years?\s*ago/i,
+      /about\s+(\d+)\s*(months?|years?)/i,
+      /(last\s+year|recently|just\s+diagnosed|this\s+year)/i,
+      /(a\s+few\s+months|a\s+few\s+years)/i,
+    ];
+    for (const pattern of relativePatterns) {
+      const match = lower.match(pattern);
+      if (match) {
+        this.state.diagnosis_date = match[0];
+        return;
+      }
+    }
+
+    // Month + year: "January 2023", "March last year"
+    const monthMatch = lower.match(/(january|february|march|april|may|june|july|august|september|october|november|december)\s*(20\d{2})?/i);
+    if (monthMatch) {
+      this.state.diagnosis_date = monthMatch[0];
+      return;
+    }
+  }
+
   private extractInfo(msg: string) {
     const lower = msg.toLowerCase();
 
-    // Detect change intent — clear the relevant field so it can be re-collected
+    // Detect change intent — clear the relevant field
     if (lower.includes("change") || lower.includes("update") || lower.includes("correct")) {
       if (lower.includes("stage")) this.state.disease_stage = undefined;
       if (lower.includes("age")) this.state.age = undefined;
@@ -131,16 +184,20 @@ export class GroqChatService {
         this.state.city = undefined;
         this.state.province = undefined;
       }
-      // After clearing, recalculate completeness
+      if (lower.includes("biomarker")) this.state.biomarkers = undefined;
+      if (lower.includes("diagnosis") || lower.includes("date") || lower.includes("diagnosed")) {
+        this.state.diagnosis_date = undefined;
+      }
       this.state.isComplete = false;
-      return; // Don't extract from a change-request message
+      return;
     }
 
     // Cancer type
     const cancerTypes = [
       "lung", "breast", "brain", "colorectal", "colon", "prostate", "melanoma",
       "ovarian", "lymphoma", "pancreatic", "thyroid", "bladder",
-      "kidney", "myeloma", "liver", "sarcoma", "leukemia", "head and neck"
+      "kidney", "myeloma", "liver", "sarcoma", "leukemia", "head and neck",
+      "gastric", "stomach", "cervical", "endometrial", "biliary", "mesothelioma"
     ];
     for (const c of cancerTypes) {
       if (lower.includes(c)) {
@@ -159,7 +216,6 @@ export class GroqChatService {
       s = map[s] || s;
       this.state.disease_stage = `Stage ${s}`;
     }
-    // Also match "advanced" without "stage" prefix
     if (!this.state.disease_stage) {
       if (lower.includes("advanced")) this.state.disease_stage = "Stage IV";
       if (lower.includes("metastatic")) this.state.disease_stage = "Stage IV";
@@ -167,7 +223,8 @@ export class GroqChatService {
     }
 
     // Age
-    const ageMatch = lower.match(/\b(\d{1,3})\s*(?:years?\s*old|yo|y\/o)\b/i) ||
+    const ageMatch =
+      lower.match(/\b(\d{1,3})\s*(?:years?\s*old|yo|y\/o)\b/i) ||
       lower.match(/\b(?:i'm|i am|age|aged)\s*(\d{1,3})\b/i) ||
       lower.match(/\b(\d{2})\s*(?:year|yr)\b/i);
     if (ageMatch) {
@@ -199,6 +256,9 @@ export class GroqChatService {
       "st. john's": { city: "St. John's", province: "Newfoundland and Labrador" },
       "regina": { city: "Regina", province: "Saskatchewan" },
       "kelowna": { city: "Kelowna", province: "British Columbia" },
+      "mississauga": { city: "Mississauga", province: "Ontario" },
+      "brampton": { city: "Brampton", province: "Ontario" },
+      "surrey": { city: "Surrey", province: "British Columbia" },
     };
     for (const [key, val] of Object.entries(cityMap)) {
       if (lower.includes(key)) {
@@ -208,7 +268,7 @@ export class GroqChatService {
       }
     }
 
-    // Province (explicit)
+    // Province
     const provinces: Record<string, string> = {
       "ontario": "Ontario", "quebec": "Quebec", "british columbia": "British Columbia",
       "bc": "British Columbia", "alberta": "Alberta", "manitoba": "Manitoba",
@@ -223,17 +283,25 @@ export class GroqChatService {
       }
     }
 
-    // Biomarkers
-    const biomarkerKeywords = ["egfr", "alk", "ros1", "braf", "kras", "pd-l1", "her2", "brca", "btk", "bcl-2"];
-    for (const b of biomarkerKeywords) {
-      if (lower.includes(b)) {
-        if (!this.state.biomarkers) this.state.biomarkers = [];
-        const formatted = b.toUpperCase();
-        if (!this.state.biomarkers.includes(formatted)) this.state.biomarkers.push(formatted);
+    // Biomarkers — handle "no" / "none" / "skip" etc.
+    const noBiomarkers = ["no biomarkers", "no biomarker", "don't know", "skip", "none", "not sure", "no idea", "i don't have"];
+    if (noBiomarkers.some(p => lower.includes(p))) {
+      if (!this.state.biomarkers) this.state.biomarkers = [];
+    } else {
+      const biomarkerKeywords = ["egfr", "alk", "ros1", "braf", "kras", "pd-l1", "her2", "brca", "btk", "bcl-2", "mss", "msi", "folr1", "ret", "fgfr", "ntrk", "met", "lag-3"];
+      for (const b of biomarkerKeywords) {
+        if (lower.includes(b)) {
+          if (!this.state.biomarkers) this.state.biomarkers = [];
+          const formatted = b.toUpperCase();
+          if (!this.state.biomarkers.includes(formatted)) this.state.biomarkers.push(formatted);
+        }
       }
     }
 
-    // Check completeness
+    // Diagnosis date extraction
+    this.extractDiagnosisDateFromContext(msg);
+
+    // isComplete is NOT used to trigger search anymore — only the LLM phrase does
     this.state.isComplete = !!(
       this.state.cancer_type &&
       this.state.disease_stage &&
@@ -255,7 +323,6 @@ export class GroqChatService {
     return updates;
   }
 
-  // Get coordinates for a city
   getCityCoordinates(): { latitude: number; longitude: number } {
     const coords: Record<string, { latitude: number; longitude: number }> = {
       "Toronto": { latitude: 43.6532, longitude: -79.3832 },
@@ -276,9 +343,10 @@ export class GroqChatService {
       "St. John's": { latitude: 47.5615, longitude: -52.7126 },
       "Regina": { latitude: 50.4452, longitude: -104.6189 },
       "Kelowna": { latitude: 49.8880, longitude: -119.4960 },
+      "Mississauga": { latitude: 43.5890, longitude: -79.6441 },
+      "Surrey": { latitude: 49.1913, longitude: -122.8490 },
     };
     if (this.state.city && coords[this.state.city]) return coords[this.state.city];
-    // Default to center of Canada
     return { latitude: 56.1304, longitude: -106.3468 };
   }
 
