@@ -3,7 +3,7 @@ import { ChatMessage, Trial, UserProfile } from "@/data/types";
 import { trials } from "@/data/trials";
 import { getRankedByBoth, getNearestTrials, getRankedTrials } from "@/lib/trialMatching";
 import { useAssistant } from "@/contexts/AssistantContext";
-import { ConversationState } from "@/lib/groqService";
+import { ConversationState, extractProfileFromImageGroq } from "@/lib/groqService";
 import TrialResultCard from "./TrialResultCard";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -20,7 +20,7 @@ interface ChatPanelProps {
 
 type PostSearchIntent = "nearest" | "best" | "recruiting" | "both" | "all" | null;
 
-// ── Conversation steps for progress bar ──────────────────────────────────
+// ── Progress step bar ──────────────────────────────────────────────────────
 const STEPS = [
   { key: "cancer_type", label: "Cancer Type", icon: "🎗️" },
   { key: "disease_stage", label: "Stage", icon: "📊" },
@@ -39,12 +39,12 @@ function getStepIndex(state: ConversationState, searchDone: boolean): number {
   if (!state.city && !state.province) return 3;
   if (state.biomarkers === undefined) return 4;
   if (!state.diagnosis_date) return 5;
-  return 6; // confirmation
+  return 6;
 }
 
-// ── Progress step bar ──────────────────────────────────────────────────
 function ProgressBar({ state, searchDone }: { state: ConversationState; searchDone: boolean }) {
   const currentStep = getStepIndex(state, searchDone);
+  const pct = Math.min(Math.round((currentStep / 7) * 100), 100);
 
   return (
     <div className="px-4 py-3 border-b border-border bg-secondary/20">
@@ -52,51 +52,49 @@ function ProgressBar({ state, searchDone }: { state: ConversationState; searchDo
         <span className="text-xs font-medium text-muted-foreground">
           {searchDone ? "Profile complete" : `Step ${Math.min(currentStep + 1, 7)} of 7`}
         </span>
-        <span className="text-xs text-primary font-semibold">
-          {searchDone ? "✓ Matched" : `${Math.round((currentStep / 7) * 100)}%`}
+        <span className="text-xs font-semibold text-primary">
+          {searchDone ? "✓ Matched" : `${pct}%`}
         </span>
       </div>
 
-      {/* Bar */}
       <div className="relative h-1.5 bg-border rounded-full overflow-hidden mb-2">
         <div
           className="absolute left-0 top-0 h-full bg-primary rounded-full transition-all duration-500 ease-out"
-          style={{ width: `${Math.min((currentStep / 7) * 100, 100)}%` }}
+          style={{ width: `${pct}%` }}
         />
       </div>
 
-      {/* Step dots */}
       <div className="flex items-center justify-between">
         {STEPS.map((step, idx) => {
           const done = currentStep > idx || searchDone;
           const active = currentStep === idx && !searchDone;
           return (
             <div key={step.key} className="flex flex-col items-center gap-0.5" style={{ flex: 1 }}>
-              <div className={`
-                w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold transition-all duration-300
-                ${done ? "bg-primary text-primary-foreground shadow-sm" :
-                  active ? "bg-primary/20 text-primary border-2 border-primary animate-pulse" :
-                  "bg-border text-muted-foreground"}
-              `}>
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold transition-all duration-300 ${
+                done ? "bg-primary text-primary-foreground shadow-sm" :
+                active ? "bg-primary/20 text-primary border-2 border-primary animate-pulse" :
+                "bg-border text-muted-foreground"
+              }`}>
                 {done ? "✓" : step.icon}
               </div>
               <span className={`text-[8px] font-medium leading-none text-center ${
-                done ? "text-primary" : active ? "text-primary" : "text-muted-foreground"
+                done || active ? "text-primary" : "text-muted-foreground"
               }`}>
                 {step.label}
               </span>
             </div>
           );
         })}
-        {/* Final "Results" dot */}
+        {/* Results dot */}
         <div className="flex flex-col items-center gap-0.5" style={{ flex: 1 }}>
-          <div className={`
-            w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold transition-all duration-300
-            ${searchDone ? "bg-emerald-500 text-white shadow-sm" : "bg-border text-muted-foreground"}
-          `}>
+          <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold transition-all duration-300 ${
+            searchDone ? "bg-emerald-500 text-white shadow-sm" : "bg-border text-muted-foreground"
+          }`}>
             {searchDone ? "🎯" : "🔍"}
           </div>
-          <span className={`text-[8px] font-medium leading-none ${searchDone ? "text-emerald-600" : "text-muted-foreground"}`}>
+          <span className={`text-[8px] font-medium leading-none ${
+            searchDone ? "text-emerald-600" : "text-muted-foreground"
+          }`}>
             Results
           </span>
         </div>
@@ -105,7 +103,7 @@ function ProgressBar({ state, searchDone }: { state: ConversationState; searchDo
   );
 }
 
-// ── Confirmation table renderer ───────────────────────────────────────────
+// ── Confirmation table renderer ────────────────────────────────────────────
 function ConfirmationTable({ content }: { content: string }) {
   const hasTable =
     content.includes("| Detail |") ||
@@ -122,10 +120,7 @@ function ConfirmationTable({ content }: { content: string }) {
 
   const lines = content.split("\n");
   const tableRows: { detail: string; value: string }[] = [];
-  let inTable = false;
-  let preText = "";
-  let postText = "";
-  let passedTable = false;
+  let inTable = false, preText = "", postText = "", passedTable = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -192,15 +187,12 @@ function ConfirmationTable({ content }: { content: string }) {
   );
 }
 
-// ── Dynamic suggestion chips ──────────────────────────────────────────────
+// ── Dynamic chips ──────────────────────────────────────────────────────────
 function getDynamicSuggestions(lastContent: string, hasAnyTrialResults: boolean): string[] {
   const c = lastContent.toLowerCase();
 
-  if (
-    (c.includes("|") && c.includes("cancer type")) ||
-    c.includes("does everything look correct") || c.includes("look correct") ||
-    c.includes("find your matching trials once you confirm") || c.includes("once you confirm")
-  ) return ["Yes, that's correct!", "I need to change something"];
+  if ((c.includes("|") && c.includes("cancer type")) || c.includes("does everything look correct") || c.includes("look correct") || c.includes("find your matching trials once you confirm") || c.includes("once you confirm"))
+    return ["Yes, that's correct!", "I need to change something"];
 
   if (c.includes("what would you like to change") || c.includes("which detail"))
     return ["Change cancer type", "Change stage", "Change age", "Change location"];
@@ -231,12 +223,9 @@ function getDynamicSuggestions(lastContent: string, hasAnyTrialResults: boolean)
 
 function detectPostSearchIntent(msg: string): PostSearchIntent {
   const lower = msg.toLowerCase();
-  const nearWords = ["nearest", "closest", "near me", "nearby", "close to me"];
-  const bestWords = ["best", "top", "highest match", "most suitable", "recommended"];
-  const recruitWords = ["recruiting", "open", "accepting", "enrolling"];
-  const hasNear = nearWords.some(w => lower.includes(w));
-  const hasBest = bestWords.some(w => lower.includes(w));
-  const hasRecruit = recruitWords.some(w => lower.includes(w));
+  const hasNear = ["nearest", "closest", "near me", "nearby"].some(w => lower.includes(w));
+  const hasBest = ["best", "top", "highest match", "most suitable"].some(w => lower.includes(w));
+  const hasRecruit = ["recruiting", "open", "accepting", "enrolling"].some(w => lower.includes(w));
   if (hasNear && hasBest) return "both";
   if (lower.includes("all trials") || lower.includes("show all")) return "all";
   if (hasNear) return "nearest";
@@ -247,86 +236,9 @@ function detectPostSearchIntent(msg: string): PostSearchIntent {
 
 function detectNewSearchIntent(msg: string): boolean {
   const lower = msg.toLowerCase();
-  const newSearchPhrases = ["check for", "search for", "look for", "find trials for", "what about", "now check", "switch to", "different cancer", "another cancer", "can we check", "can you check", "how about"];
-  const cancerTypes = ["lung", "breast", "brain", "colorectal", "prostate", "melanoma", "ovarian", "lymphoma", "pancreatic", "thyroid", "bladder", "kidney", "myeloma", "liver", "sarcoma", "leukemia", "gastric", "cervical", "endometrial"];
-  return cancerTypes.some(c => lower.includes(c)) && newSearchPhrases.some(p => lower.includes(p));
-}
-
-// ── File upload: extract profile from PDF/image via Claude API ────────────
-async function extractProfileFromFile(file: File): Promise<Partial<ConversationState> & { rawText?: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const base64 = (reader.result as string).split(",")[1];
-        const isPDF = file.type === "application/pdf";
-        const mediaType = isPDF ? "application/pdf" : file.type as "image/jpeg" | "image/png" | "image/gif" | "image/webp";
-
-        const contentBlock = isPDF
-          ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }
-          : { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } };
-
-        const response = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 1000,
-            messages: [{
-              role: "user",
-              content: [
-                contentBlock,
-                {
-                  type: "text",
-                  text: `You are a medical data extractor. Extract the following information from this medical/pathology report and return ONLY a JSON object with these exact keys. If a field is not found, use null.
-
-{
-  "patient_name": "full name of patient or null",
-  "age": age as integer or null,
-  "cancer_type": "simplified cancer type e.g. Lung, Breast, Colorectal, Prostate, etc. or null",
-  "disease_stage": "Stage I / Stage II / Stage III / Stage IV / or null",
-  "biomarkers": ["list", "of", "biomarkers"] or [],
-  "diagnosis_date": "approximate date or period e.g. '2023' or 'March 2024' or null",
-  "city": "Canadian city name or null",
-  "province": "Canadian province name or null"
-}
-
-Return ONLY the JSON object, no explanation, no markdown, no backticks.`
-                }
-              ]
-            }]
-          })
-        });
-
-        if (!response.ok) {
-          throw new Error(`Claude API error: ${response.status}`);
-        }
-
-        const data = await response.json();
-        const text = data.content?.map((c: { type: string; text?: string }) => c.text || "").join("") || "{}";
-
-        // Parse JSON safely
-        const clean = text.replace(/```json|```/g, "").trim();
-        const parsed = JSON.parse(clean);
-
-        const result: Partial<ConversationState> = {};
-        if (parsed.patient_name) result.patient_name = parsed.patient_name;
-        if (parsed.age && parsed.age >= 1 && parsed.age <= 120) result.age = parsed.age;
-        if (parsed.cancer_type) result.cancer_type = parsed.cancer_type;
-        if (parsed.disease_stage) result.disease_stage = parsed.disease_stage;
-        if (Array.isArray(parsed.biomarkers) && parsed.biomarkers.length > 0) result.biomarkers = parsed.biomarkers;
-        if (parsed.diagnosis_date) result.diagnosis_date = parsed.diagnosis_date;
-        if (parsed.city) result.city = parsed.city;
-        if (parsed.province) result.province = parsed.province;
-
-        resolve({ ...result, rawText: clean });
-      } catch (err) {
-        reject(err);
-      }
-    };
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.readAsDataURL(file);
-  });
+  const phrases = ["check for", "search for", "look for", "find trials for", "what about", "now check", "switch to", "different cancer", "another cancer", "can we check", "can you check", "how about"];
+  const cancers = ["lung", "breast", "brain", "colorectal", "prostate", "melanoma", "ovarian", "lymphoma", "pancreatic", "thyroid", "bladder", "kidney", "myeloma", "liver", "sarcoma", "leukemia", "gastric", "cervical", "endometrial"];
+  return cancers.some(c => lower.includes(c)) && phrases.some(p => lower.includes(p));
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -334,10 +246,7 @@ const ChatPanel = ({
   userProfile, onTrialsFound, onZoomToLocation,
   onViewSummary, selectedTrialId
 }: ChatPanelProps) => {
-  const {
-    messages, setMessages, setUserProfile, setProfileReady,
-    chatService, searchDone, setSearchDone, allFoundTrials, setAllFoundTrials
-  } = useAssistant();
+  const { messages, setMessages, setUserProfile, setProfileReady, chatService, searchDone, setSearchDone, allFoundTrials, setAllFoundTrials } = useAssistant();
 
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -351,9 +260,7 @@ const ChatPanel = ({
 
   useEffect(() => {
     const lastMsg = messages[messages.length - 1];
-    if (lastMsg && !lastMsg.trials) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
+    if (lastMsg && !lastMsg.trials) messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
@@ -367,7 +274,7 @@ const ChatPanel = ({
     }
   }, [selectedTrialId]);
 
-  const buildProfile = useCallback(() => {
+  const buildProfile = useCallback((): UserProfile => {
     const coords = chatService.getCityCoordinates();
     const profileUpdates = chatService.buildUserProfile();
     const state = chatService.getState();
@@ -377,7 +284,7 @@ const ChatPanel = ({
       latitude: coords.latitude,
       longitude: coords.longitude,
       location: `${state.city || ""}, ${state.province || ""}`,
-    } as UserProfile;
+    };
   }, [chatService, userProfile]);
 
   const performTrialSearch = useCallback(() => {
@@ -413,15 +320,15 @@ const ChatPanel = ({
     }
   }, [allFoundTrials]);
 
-  // ── Handle file upload ───────────────────────────────────────────────────
+  // ── File upload handler ────────────────────────────────────────────────
   const handleFileUpload = async (file: File) => {
-    if (!file) return;
-
-    const allowedTypes = ["application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp"];
+    const allowedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    // Note: PDFs need to be converted to images first for Groq vision
+    // For now accept images only; PDF support can be added with PDF.js later
     if (!allowedTypes.includes(file.type)) {
       setMessages(prev => [...prev, {
         id: Date.now().toString(), role: "assistant",
-        content: "Sorry, I can only read PDF files or images (JPG, PNG, GIF, WebP). Please try again with a supported file type.",
+        content: "Please upload an image of your report (JPG, PNG, GIF, or WebP). For PDFs, try taking a screenshot of the main page and uploading that.",
       }]);
       return;
     }
@@ -429,39 +336,50 @@ const ChatPanel = ({
     setUploadedFileName(file.name);
     setIsExtracting(true);
 
-    // Show uploading message
-    setMessages(prev => [...prev,
-      { id: Date.now().toString(), role: "user", content: `📎 Uploaded: ${file.name}` },
-    ]);
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(), role: "user",
+      content: `📎 Uploaded: ${file.name}`,
+    }]);
 
     try {
-      const extracted = await extractProfileFromFile(file);
-      const foundFields = Object.keys(extracted).filter(k => k !== "rawText" && extracted[k as keyof typeof extracted] !== undefined);
+      // Convert to base64
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1]);
+        reader.onerror = () => reject(new Error("Failed to read file"));
+        reader.readAsDataURL(file);
+      });
+
+      // Extract using Groq vision model
+      const extracted = await extractProfileFromImageGroq(base64, file.type);
+
+      const foundFields = Object.keys(extracted).filter(k =>
+        extracted[k as keyof typeof extracted] !== undefined
+      );
 
       if (foundFields.length === 0) {
         setMessages(prev => [...prev, {
           id: Date.now().toString(), role: "assistant",
-          content: "I wasn't able to extract medical information from this file. It may not be a pathology or lab report. Could you try a different document, or just tell me about your condition directly?",
+          content: "I wasn't able to extract medical information from this image. It may not be a pathology or lab report. Could you try a clearer image, or just tell me your details directly?",
         }]);
         setIsExtracting(false);
         setUploadedFileName(null);
         return;
       }
 
-      // Inject into groqService state
-      const summary = chatService.injectExtractedProfile(extracted);
+      // Inject into groqService
+      chatService.injectExtractedProfile(extracted);
       setConvState(chatService.getState());
 
-      // Update userProfile progressively
+      // Update React userProfile state
       const profileUpdates = chatService.buildUserProfile();
       if (Object.keys(profileUpdates).length > 0) {
-        const state = chatService.getState();
         const coords = chatService.getCityCoordinates();
         setUserProfile({ ...(userProfile || {} as UserProfile), ...profileUpdates, latitude: coords.latitude, longitude: coords.longitude });
       }
 
       // Get LLM to acknowledge and ask for missing fields
-      const result = await chatService.sendMessage(`[System: Report processed. ${summary}]`);
+      const result = await chatService.sendMessage("[Report processed, please acknowledge what was found and ask for missing fields]");
       setConvState(chatService.getState());
 
       setMessages(prev => [...prev, {
@@ -475,28 +393,31 @@ const ChatPanel = ({
         const { found } = performTrialSearch();
         setSearchDone(true);
         if (onTrialsFound) onTrialsFound(found);
-        setMessages(prev => [...prev,
-          { id: (Date.now() + 2).toString(), role: "assistant", content: result.response },
-          { id: (Date.now() + 3).toString(), role: "assistant", content: found.length > 0 ? `I found **${found.length} matching trial${found.length > 1 ? "s" : ""}** for you. Here are your best matches:` : "No trials found matching your criteria.", trials: found.length > 0 ? found : undefined }
-        ]);
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 2).toString(), role: "assistant",
+          content: found.length > 0
+            ? `I found **${found.length} matching trial${found.length > 1 ? "s" : ""}** for you. Here are your best matches:`
+            : "No trials found matching your criteria.",
+          trials: found.length > 0 ? found : undefined,
+        }]);
       }
 
     } catch (err) {
-      console.error("File extraction error:", err);
+      console.error("Extraction error:", err);
       setMessages(prev => [...prev, {
         id: Date.now().toString(), role: "assistant",
-        content: "I had trouble reading that file. Please make sure it's a clear, readable document. You can also just tell me your details directly in the chat.",
+        content: "I had trouble reading that image. Please make sure it's a clear, well-lit photo of your medical report. You can also just type your details directly.",
       }]);
+      setUploadedFileName(null);
     }
 
     setIsExtracting(false);
   };
 
-  // ── Handle send ──────────────────────────────────────────────────────────
+  // ── Send message ───────────────────────────────────────────────────────
   const handleSend = async () => {
     if (!input.trim()) return;
-    const userMsg: ChatMessage = { id: Date.now().toString(), role: "user", content: input };
-    setMessages(prev => [...prev, userMsg]);
+    setMessages(prev => [...prev, { id: Date.now().toString(), role: "user", content: input }]);
     const currentInput = input;
     setInput("");
     setIsTyping(true);
@@ -534,7 +455,13 @@ const ChatPanel = ({
         if (onTrialsFound) onTrialsFound(found);
         setMessages(prev => [...prev,
           { id: (Date.now() + 1).toString(), role: "assistant", content: result.response },
-          { id: (Date.now() + 2).toString(), role: "assistant", content: found.length > 0 ? `I found **${found.length} matching trial${found.length > 1 ? "s" : ""}** for you. Here are your best matches:` : "I couldn't find trials matching your criteria. Try broadening your search or clicking **Start over**.", trials: found.length > 0 ? found : undefined }
+          {
+            id: (Date.now() + 2).toString(), role: "assistant",
+            content: found.length > 0
+              ? `I found **${found.length} matching trial${found.length > 1 ? "s" : ""}** for you. Here are your best matches:`
+              : "I couldn't find trials matching your criteria. Try broadening your search or clicking **Start over**.",
+            trials: found.length > 0 ? found : undefined,
+          }
         ]);
       } else {
         if (userProfile) {
@@ -567,10 +494,12 @@ const ChatPanel = ({
     setUploadedFileName(null);
     if (onTrialsFound) onTrialsFound([]);
     setProfileReady(false);
-    setMessages([{ id: "welcome", role: "assistant", content: "Hi there! 👋 Let's start fresh. What type of cancer have you been diagnosed with? You can also **upload a medical report** using the 📎 button below." }]);
+    setMessages([{
+      id: "welcome", role: "assistant",
+      content: "Hi there! 👋 Let's start fresh. What type of cancer have you been diagnosed with?\n\nYou can also **📎 upload a photo of your pathology report** to auto-fill your details instantly.",
+    }]);
   };
 
-  // ── Chips ────────────────────────────────────────────────────────────────
   const lastAssistantMsg = [...messages].reverse().find(m => m.role === "assistant");
   const lastContent = lastAssistantMsg?.content || "";
   const hasAnyTrialResults = messages.some(m => m.trials && m.trials.length > 0);
@@ -623,60 +552,60 @@ const ChatPanel = ({
         {(isTyping || isExtracting) && (
           <div className="flex justify-start">
             <div className="chat-bubble-assistant">
-              <div className="flex gap-2 items-center">
-                {isExtracting ? (
-                  <>
-                    <Loader2 className="w-3 h-3 animate-spin text-primary" />
-                    <span className="text-xs text-muted-foreground">Reading your report...</span>
-                  </>
-                ) : (
-                  <div className="flex gap-1">
-                    <span className="w-2 h-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <span className="w-2 h-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <span className="w-2 h-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "300ms" }} />
-                  </div>
-                )}
-              </div>
+              {isExtracting ? (
+                <div className="flex gap-2 items-center">
+                  <Loader2 className="w-3 h-3 animate-spin text-primary" />
+                  <span className="text-xs text-muted-foreground">Reading your report with AI...</span>
+                </div>
+              ) : (
+                <div className="flex gap-1">
+                  <span className="w-2 h-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-2 h-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-2 h-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
+              )}
             </div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Upload status banner */}
+      {/* Upload status */}
       {uploadedFileName && !isExtracting && (
         <div className="mx-3 mb-1 flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700">
           <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
           <span className="flex-1 truncate">Report loaded: {uploadedFileName}</span>
-          <button onClick={() => setUploadedFileName(null)} className="text-emerald-500 hover:text-emerald-700">
-            <X className="w-3 h-3" />
+          <button onClick={() => setUploadedFileName(null)}>
+            <X className="w-3 h-3 text-emerald-500 hover:text-emerald-700" />
           </button>
         </div>
       )}
 
-      {/* Input area */}
+      {/* Input */}
       <div className="p-3 border-t border-border space-y-2">
-        {/* Upload hint — only before search */}
+        {/* Upload hint banner — only shown before search, no file yet */}
         {!searchDone && !uploadedFileName && (
           <button
             onClick={() => fileInputRef.current?.click()}
             className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-border text-xs text-muted-foreground hover:border-primary hover:text-primary hover:bg-primary/5 transition-all"
           >
-            <Paperclip className="w-3.5 h-3.5" />
-            Upload a pathology report or lab result to auto-fill your details
+            <Paperclip className="w-3.5 h-3.5 flex-shrink-0" />
+            <span>Upload a photo of your pathology report to auto-fill your details</span>
           </button>
         )}
 
         <div className="flex gap-2">
-          {/* Attach button */}
           {!searchDone && (
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isExtracting}
+              title="Upload medical report image (JPG, PNG)"
               className="rounded-full border border-border p-2.5 text-muted-foreground hover:text-primary hover:border-primary hover:bg-primary/5 transition-colors disabled:opacity-50"
-              title="Upload medical report (PDF or image)"
             >
-              {isExtracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+              {isExtracting
+                ? <Loader2 className="w-4 h-4 animate-spin" />
+                : <Paperclip className="w-4 h-4" />
+              }
             </button>
           )}
 
@@ -693,26 +622,25 @@ const ChatPanel = ({
             onClick={handleSend}
             disabled={!input.trim() || isTyping || isExtracting}
             className="rounded-full bg-primary text-primary-foreground p-2.5 disabled:opacity-50 hover:opacity-90 transition-opacity"
-            aria-label="Send"
           >
             <Send className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Hidden file input */}
+        {/* Hidden file input — images only for Groq vision */}
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,image/jpeg,image/png,image/gif,image/webp"
+          accept="image/jpeg,image/png,image/gif,image/webp"
           className="hidden"
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) handleFileUpload(file);
-            e.target.value = ""; // reset so same file can be re-uploaded
+            e.target.value = "";
           }}
         />
 
-        {/* Dynamic suggestion chips */}
+        {/* Dynamic chips */}
         <div className="flex gap-2 flex-wrap">
           {suggestions.map((s) => (
             <button
