@@ -37,11 +37,134 @@ function detectPostSearchIntent(msg: string): PostSearchIntent {
   return null;
 }
 
+// ── Beautiful confirmation table renderer ──────────────────────────────────
+function ConfirmationTable({ content }: { content: string }) {
+  // Check if content contains a markdown table
+  if (!content.includes("| Detail |") && !content.includes("|---|")) {
+    return (
+      <div className="text-sm prose prose-sm max-w-none [&>p]:m-0">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      </div>
+    );
+  }
+
+  // Split content into parts: text before table, table, text after table
+  const lines = content.split("\n");
+  const tableStartIdx = lines.findIndex(l => l.trim().startsWith("| Detail") || l.trim().startsWith("|---|") || l.trim().startsWith("| ---"));
+  
+  // Find table rows
+  const tableRows: { detail: string; value: string }[] = [];
+  let inTable = false;
+  let preText = "";
+  let postText = "";
+  let passedTable = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.startsWith("| Detail |") || line.startsWith("| **Detail**")) {
+      inTable = true;
+      continue; // skip header
+    }
+    if (inTable && (line.startsWith("|---") || line.startsWith("| ---") || line === "|---|---|")) {
+      continue; // skip separator
+    }
+    if (inTable && line.startsWith("|") && line.endsWith("|")) {
+      const parts = line.split("|").map(p => p.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        tableRows.push({ detail: parts[0], value: parts[1] });
+      }
+    } else if (inTable && !line.startsWith("|")) {
+      inTable = false;
+      passedTable = true;
+      postText += lines[i] + "\n";
+    } else if (!inTable && !passedTable) {
+      preText += lines[i] + "\n";
+    } else if (passedTable) {
+      postText += lines[i] + "\n";
+    }
+  }
+
+  const iconMap: Record<string, string> = {
+    "Cancer Type": "🎗️",
+    "Stage": "📊",
+    "Age": "👤",
+    "Location": "📍",
+    "Biomarkers": "🧬",
+    "Diagnosis Date": "📅",
+  };
+
+  const colorMap: Record<string, string> = {
+    "Cancer Type": "bg-rose-50 border-rose-100",
+    "Stage": "bg-purple-50 border-purple-100",
+    "Age": "bg-blue-50 border-blue-100",
+    "Location": "bg-teal-50 border-teal-100",
+    "Biomarkers": "bg-amber-50 border-amber-100",
+    "Diagnosis Date": "bg-indigo-50 border-indigo-100",
+  };
+
+  return (
+    <div className="space-y-3">
+      {preText.trim() && (
+        <div className="text-sm prose prose-sm max-w-none [&>p]:m-0">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{preText.trim()}</ReactMarkdown>
+        </div>
+      )}
+
+      {tableRows.length > 0 && (
+        <div className="rounded-xl border border-border overflow-hidden shadow-sm">
+          {/* Header */}
+          <div className="bg-primary px-4 py-2.5 flex items-center gap-2">
+            <span className="text-primary-foreground text-sm font-semibold">Your Profile Summary</span>
+          </div>
+          {/* Rows */}
+          <div className="divide-y divide-border">
+            {tableRows.map((row, idx) => (
+              <div
+                key={idx}
+                className={`flex items-center gap-3 px-4 py-3 ${colorMap[row.detail] || "bg-white"} border-l-2 ${
+                  colorMap[row.detail]?.includes("rose") ? "border-l-rose-300" :
+                  colorMap[row.detail]?.includes("purple") ? "border-l-purple-300" :
+                  colorMap[row.detail]?.includes("blue") ? "border-l-blue-300" :
+                  colorMap[row.detail]?.includes("teal") ? "border-l-teal-300" :
+                  colorMap[row.detail]?.includes("amber") ? "border-l-amber-300" :
+                  "border-l-indigo-300"
+                }`}
+              >
+                <span className="text-lg w-7 flex-shrink-0">{iconMap[row.detail] || "•"}</span>
+                <div className="flex-1 flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    {row.detail}
+                  </span>
+                  <span className={`text-sm font-medium text-right ${
+                    row.value === "Not specified" ? "text-muted-foreground italic" : "text-foreground"
+                  }`}>
+                    {row.value}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {postText.trim() && (
+        <div className="text-sm prose prose-sm max-w-none [&>p]:m-0">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{postText.trim()}</ReactMarkdown>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main Component ─────────────────────────────────────────────────────────
 const ChatPanel = ({
   userProfile, onTrialsFound, onZoomToLocation, onViewTrialDetails,
   onViewSummary, selectedTrialId
 }: ChatPanelProps) => {
-  const { messages, setMessages, setUserProfile, setProfileReady, chatService, searchDone, setSearchDone, allFoundTrials, setAllFoundTrials } = useAssistant();
+  const {
+    messages, setMessages, setUserProfile, setProfileReady,
+    chatService, searchDone, setSearchDone, allFoundTrials, setAllFoundTrials
+  } = useAssistant();
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [convState, setConvState] = useState(chatService.getState());
@@ -98,11 +221,8 @@ const ChatPanel = ({
     const updatedProfile = buildProfile();
     setUserProfile(updatedProfile);
     setProfileReady(true);
-
-    // Store all found trials (unsliced) for post-search queries
     setAllFoundTrials(found);
 
-    // Default: rank by combined score, show top 8
     if (found.length > 0) {
       found = getRankedByBoth(found, updatedProfile).slice(0, 8);
     }
@@ -116,45 +236,34 @@ const ChatPanel = ({
     switch (intent) {
       case "nearest": {
         const nearest = getNearestTrials(allFoundTrials, profile, 5);
-        return {
-          trials: nearest,
-          message: `Here are the **${nearest.length} nearest trials** to ${profile.city || "your location"}:`,
-        };
+        return { trials: nearest, message: `Here are the **${nearest.length} nearest trials** to ${profile.city || "your location"}:` };
       }
       case "best": {
         const best = getRankedTrials(allFoundTrials, profile).slice(0, 5);
-        return {
-          trials: best,
-          message: `Here are the **top ${best.length} best-matching trials** for your profile:`,
-        };
+        return { trials: best, message: `Here are the **top ${best.length} best-matching trials** for your profile:` };
       }
       case "recruiting": {
         const recruiting = allFoundTrials.filter(t => t.recruitment_status === "Recruiting");
         const ranked = getRankedByBoth(recruiting, profile).slice(0, 6);
-        return {
-          trials: ranked,
-          message: `Found **${recruiting.length} recruiting trials**. Here are the top matches:`,
-        };
+        return { trials: ranked, message: `Found **${recruiting.length} recruiting trials**. Here are the top matches:` };
       }
       case "both": {
-        // Show nearest that also have high match
         const ranked = getRankedByBoth(allFoundTrials, profile).slice(0, 6);
-        return {
-          trials: ranked,
-          message: `Here are trials ranked by **both proximity and match score**:`,
-        };
+        return { trials: ranked, message: `Here are trials ranked by **both proximity and match score**:` };
       }
       case "all": {
         const ranked = getRankedByBoth(allFoundTrials, profile).slice(0, 12);
-        return {
-          trials: ranked,
-          message: `Showing **${ranked.length} of ${allFoundTrials.length} total trials** found:`,
-        };
+        return { trials: ranked, message: `Showing **${ranked.length} of ${allFoundTrials.length} total trials** found:` };
       }
       default:
         return null;
     }
   }, [allFoundTrials]);
+
+  const hasConfirmationTable = (content: string) =>
+    content.includes("| Detail |") ||
+    content.includes("|---|") ||
+    (content.includes("|") && content.includes("Cancer Type"));
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -165,7 +274,7 @@ const ChatPanel = ({
     setIsTyping(true);
 
     try {
-      // If search is done, check for post-search intents first
+      // Post-search intent handling
       if (searchDone && userProfile) {
         const intent = detectPostSearchIntent(currentInput);
         if (intent) {
@@ -189,30 +298,38 @@ const ChatPanel = ({
       const result = await chatService.sendMessage(currentInput);
       setConvState(chatService.getState());
 
+      // Only trigger search when LLM says the exact phrase
       if (result.shouldSearch && !searchDone) {
         const { found, profile } = performTrialSearch();
         setSearchDone(true);
 
         if (onTrialsFound) onTrialsFound(found);
 
+        // Show the LLM's confirmation reply first, then results
+        const confirmMsg: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: result.response,
+        };
+        setMessages((prev) => [...prev, confirmMsg]);
+
         const summary = found.length > 0
           ? `I found **${found.length} matching trial${found.length > 1 ? "s" : ""}** for you. Here are your best matches:`
           : "I couldn't find trials matching your exact criteria. Try broadening your search.";
 
         const assistantMsg: ChatMessage = {
-          id: (Date.now() + 1).toString(),
+          id: (Date.now() + 2).toString(),
           role: "assistant",
           content: summary,
           trials: found.length > 0 ? found : undefined,
         };
         setMessages((prev) => [...prev, assistantMsg]);
       } else {
-        // Update profile progressively (but don't set profileReady until search)
+        // Update profile progressively
         if (userProfile) {
           const profileUpdates = chatService.buildUserProfile();
           if (Object.keys(profileUpdates).length > 0) {
             const state = chatService.getState();
-            // Only update coords if city was provided
             if (state.city) {
               const coords = chatService.getCityCoordinates();
               setUserProfile({ ...userProfile, ...profileUpdates, latitude: coords.latitude, longitude: coords.longitude });
@@ -256,83 +373,57 @@ const ChatPanel = ({
     }]);
   };
 
-  // Dynamic suggestion chips based on reactive conversation state + last message context
   const getSuggestions = (): string[] => {
     if (searchDone) {
       return ["Find nearest trials", "Show best matches", "Show recruiting trials", "Best and nearest"];
     }
 
-    // Check last assistant message for context-aware suggestions
     const lastAssistantMsg = [...messages].reverse().find(m => m.role === "assistant");
     const lastContent = lastAssistantMsg?.content?.toLowerCase() || "";
 
-    // If showing confirmation table, offer confirm/change
-    const isConfirming = lastContent.includes("look correct") || 
-                         lastContent.includes("does everything") ||
-                         lastContent.includes("shall i search") ||
-                         lastContent.includes("once you confirm") ||
-                         lastContent.includes("| detail |");
-    if (isConfirming) {
+    // Confirmation table shown — offer confirm or change
+    if (hasConfirmationTable(lastAssistantMsg?.content || "")) {
+      return ["Yes, that's correct!", "I need to change something"];
+    }
+
+    if (lastContent.includes("look correct") || lastContent.includes("does everything") || lastContent.includes("shall i search") || lastContent.includes("once you confirm")) {
       return ["Yes, search for trials", "I need to change something"];
     }
 
-    // If asking what to change
-    const isAskingChange = lastContent.includes("what would you like to change") || 
-                           lastContent.includes("which detail") ||
-                           lastContent.includes("what do you want to update");
-    if (isAskingChange) {
+    if (lastContent.includes("what would you like to change") || lastContent.includes("which detail")) {
       return ["Change cancer type", "Change stage", "Change age", "Change location"];
     }
 
-    // If asking about stage (including re-asking after change request)
-    const isAskingStage = lastContent.includes("what stage") || lastContent.includes("which stage") || lastContent.includes("stage of");
-    if (isAskingStage) {
+    if (lastContent.includes("what stage") || lastContent.includes("which stage") || lastContent.includes("stage of")) {
       return ["Stage 1", "Stage 2", "Stage 3", "Stage 4"];
     }
 
-    // If asking about cancer type
-    const isAskingType = lastContent.includes("what type") || lastContent.includes("which type") || lastContent.includes("diagnosed with");
-    if (isAskingType) {
+    if (lastContent.includes("what type") || lastContent.includes("which type") || lastContent.includes("diagnosed with")) {
       return ["Lung cancer", "Breast cancer", "Colorectal cancer", "Prostate cancer"];
     }
 
-    // If asking about age
-    const isAskingAge = lastContent.includes("how old") || lastContent.includes("your age") || lastContent.includes("mind me asking");
-    if (isAskingAge) {
+    if (lastContent.includes("how old") || lastContent.includes("your age") || lastContent.includes("mind me asking")) {
       return ["I'm 45 years old", "I'm 55 years old", "I'm 65 years old"];
     }
 
-    // If asking about location
-    const isAskingLocation = lastContent.includes("which city") || lastContent.includes("where are you") || lastContent.includes("located") || lastContent.includes("based in");
-    if (isAskingLocation) {
+    if (lastContent.includes("which city") || lastContent.includes("where are you") || lastContent.includes("located") || lastContent.includes("based in")) {
       return ["I live in Toronto", "I live in Vancouver", "I live in Montreal"];
     }
 
-    // If asking about biomarkers
-    const isAskingBio = lastContent.includes("biomarker") || lastContent.includes("genetic mutation") || lastContent.includes("mutation");
-    if (isAskingBio) {
+    if (lastContent.includes("biomarker") || lastContent.includes("genetic mutation") || lastContent.includes("mutation")) {
       return ["EGFR positive", "PD-L1 positive", "I don't know", "No biomarkers"];
     }
 
-    // If asking about diagnosis date
-    const isAskingDate = lastContent.includes("diagnosis date") || lastContent.includes("when were you") || lastContent.includes("when did you");
-    if (isAskingDate) {
-      return ["Recently diagnosed", "About a year ago", "I'd rather not say"];
+    // Diagnosis date question
+    if (lastContent.includes("diagnosed") || lastContent.includes("diagnosis date") || lastContent.includes("first diagnosed") || lastContent.includes("when were you")) {
+      return ["About 6 months ago", "About a year ago", "2023", "I'd rather not say"];
     }
 
-    // Default flow based on what's missing
-    if (!convState.cancer_type) {
-      return ["I have lung cancer", "I have breast cancer", "I have colorectal cancer"];
-    }
-    if (!convState.disease_stage) {
-      return ["Stage 1", "Stage 2", "Stage 3", "Stage 4"];
-    }
-    if (!convState.age) {
-      return ["I'm 45 years old", "I'm 55 years old", "I'm 65 years old"];
-    }
-    if (!convState.city) {
-      return ["I live in Toronto", "I live in Vancouver", "I live in Montreal"];
-    }
+    if (!convState.cancer_type) return ["I have lung cancer", "I have breast cancer", "I have colorectal cancer"];
+    if (!convState.disease_stage) return ["Stage 1", "Stage 2", "Stage 3", "Stage 4"];
+    if (!convState.age) return ["I'm 45 years old", "I'm 55 years old", "I'm 65 years old"];
+    if (!convState.city) return ["I live in Toronto", "I live in Vancouver", "I live in Montreal"];
+
     return [];
   };
 
@@ -367,9 +458,7 @@ const ChatPanel = ({
             ) : (
               <div className="w-full max-w-md space-y-2">
                 <div className="chat-bubble-assistant">
-                  <div className="text-sm prose prose-sm max-w-none [&>p]:m-0 [&>ul]:m-0 [&>ol]:m-0 [&>table]:w-full [&>table]:border-collapse [&>table]:rounded-lg [&>table]:overflow-hidden [&>table]:my-2 [&>table>thead]:bg-primary/10 [&>table>thead>tr>th]:px-3 [&>table>thead>tr>th]:py-2 [&>table>thead>tr>th]:text-left [&>table>thead>tr>th]:text-xs [&>table>thead>tr>th]:font-semibold [&>table>thead>tr>th]:text-foreground [&>table>tbody>tr>td]:px-3 [&>table>tbody>tr>td]:py-2 [&>table>tbody>tr>td]:text-xs [&>table>tbody>tr>td]:border-t [&>table>tbody>tr>td]:border-border [&>table>tbody>tr]:hover:bg-muted/50">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-                  </div>
+                  <ConfirmationTable content={msg.content} />
                 </div>
                 {msg.trials && msg.trials.length > 0 && msg.trials.map((trial) => (
                   <div
@@ -388,10 +477,11 @@ const ChatPanel = ({
             )}
           </div>
         ))}
+
         {isTyping && (
           <div className="flex justify-start">
             <div className="chat-bubble-assistant">
-              <div className="flex gap-1">
+              <div className="flex gap-1 items-center">
                 <span className="w-2 h-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "0ms" }} />
                 <span className="w-2 h-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "150ms" }} />
                 <span className="w-2 h-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "300ms" }} />
@@ -429,7 +519,7 @@ const ChatPanel = ({
           {getSuggestions().map((s) => (
             <button
               key={s}
-              onClick={() => { setInput(s); }}
+              onClick={() => setInput(s)}
               className="text-xs px-3 py-1.5 rounded-full border border-border text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
             >
               {s}
