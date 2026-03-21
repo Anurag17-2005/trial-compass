@@ -367,8 +367,8 @@ const ChatPanel = ({
             ) : (
               <div className="w-full max-w-md space-y-2">
                 <div className="chat-bubble-assistant">
-                  <div className="text-sm prose prose-sm max-w-none [&>p]:m-0 [&>ul]:m-0 [&>ol]:m-0">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  <div className="text-sm prose prose-sm max-w-none [&>p]:m-0 [&>ul]:m-0 [&>ol]:m-0 [&>table]:w-full [&>table]:border-collapse [&>table]:rounded-lg [&>table]:overflow-hidden [&>table]:my-2 [&>table>thead]:bg-primary/10 [&>table>thead>tr>th]:px-3 [&>table>thead>tr>th]:py-2 [&>table>thead>tr>th]:text-left [&>table>thead>tr>th]:text-xs [&>table>thead>tr>th]:font-semibold [&>table>thead>tr>th]:text-foreground [&>table>tbody>tr>td]:px-3 [&>table>tbody>tr>td]:py-2 [&>table>tbody>tr>td]:text-xs [&>table>tbody>tr>td]:border-t [&>table>tbody>tr>td]:border-border [&>table>tbody>tr]:hover:bg-muted/50">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                   </div>
                 </div>
                 {msg.trials && msg.trials.length > 0 && msg.trials.map((trial) => (
