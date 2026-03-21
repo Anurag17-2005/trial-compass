@@ -5,6 +5,7 @@ import { getRankedByBoth, getNearestTrials, getRankedTrials, calculateTrialSuita
 import { useAssistant } from "@/contexts/AssistantContext";
 import TrialResultCard from "./TrialResultCard";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Send, RotateCcw } from "lucide-react";
 
 interface ChatPanelProps {
@@ -265,38 +266,58 @@ const ChatPanel = ({
     const lastAssistantMsg = [...messages].reverse().find(m => m.role === "assistant");
     const lastContent = lastAssistantMsg?.content?.toLowerCase() || "";
 
-    // If confirming details, offer confirm/change options
-    const isConfirming = lastContent.includes("confirm") || 
-                         lastContent.includes("does that") ||
-                         lastContent.includes("look correct") ||
+    // If showing confirmation table, offer confirm/change
+    const isConfirming = lastContent.includes("look correct") || 
+                         lastContent.includes("does everything") ||
                          lastContent.includes("shall i search") ||
-                         lastContent.includes("sound right");
+                         lastContent.includes("once you confirm") ||
+                         lastContent.includes("| detail |");
     if (isConfirming) {
-      return ["Yes, that's correct", "I need to change something"];
+      return ["Yes, search for trials", "I need to change something"];
+    }
+
+    // If asking what to change
+    const isAskingChange = lastContent.includes("what would you like to change") || 
+                           lastContent.includes("which detail") ||
+                           lastContent.includes("what do you want to update");
+    if (isAskingChange) {
+      return ["Change cancer type", "Change stage", "Change age", "Change location"];
     }
 
     // If asking about stage (including re-asking after change request)
-    const isAskingStage = lastContent.includes("what stage") || lastContent.includes("which stage");
+    const isAskingStage = lastContent.includes("what stage") || lastContent.includes("which stage") || lastContent.includes("stage of");
     if (isAskingStage) {
       return ["Stage 1", "Stage 2", "Stage 3", "Stage 4"];
     }
 
-    // If asking about cancer type (including re-asking)
+    // If asking about cancer type
     const isAskingType = lastContent.includes("what type") || lastContent.includes("which type") || lastContent.includes("diagnosed with");
-    if (isAskingType && convState.cancer_type) {
+    if (isAskingType) {
       return ["Lung cancer", "Breast cancer", "Colorectal cancer", "Prostate cancer"];
     }
 
     // If asking about age
-    const isAskingAge = lastContent.includes("how old") || lastContent.includes("your age");
+    const isAskingAge = lastContent.includes("how old") || lastContent.includes("your age") || lastContent.includes("mind me asking");
     if (isAskingAge) {
       return ["I'm 45 years old", "I'm 55 years old", "I'm 65 years old"];
     }
 
     // If asking about location
-    const isAskingLocation = lastContent.includes("which city") || lastContent.includes("where are you") || lastContent.includes("located");
+    const isAskingLocation = lastContent.includes("which city") || lastContent.includes("where are you") || lastContent.includes("located") || lastContent.includes("based in");
     if (isAskingLocation) {
       return ["I live in Toronto", "I live in Vancouver", "I live in Montreal"];
+    }
+
+    // If asking about biomarkers
+    const isAskingBio = lastContent.includes("biomarker") || lastContent.includes("genetic mutation") || lastContent.includes("mutation");
+    if (isAskingBio) {
+      return ["EGFR positive", "PD-L1 positive", "I don't know", "No biomarkers"];
+    }
+
+    // If asking about diagnosis date
+    const isAskingDate = lastContent.includes("diagnosis date") || lastContent.includes("when were you") || lastContent.includes("when did you");
+    if (isAskingDate) {
+      return ["Recently diagnosed", "About a year ago", "I'd rather not say"];
     }
 
     // Default flow based on what's missing
@@ -346,8 +367,8 @@ const ChatPanel = ({
             ) : (
               <div className="w-full max-w-md space-y-2">
                 <div className="chat-bubble-assistant">
-                  <div className="text-sm prose prose-sm max-w-none [&>p]:m-0 [&>ul]:m-0 [&>ol]:m-0">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  <div className="text-sm prose prose-sm max-w-none [&>p]:m-0 [&>ul]:m-0 [&>ol]:m-0 [&>table]:w-full [&>table]:border-collapse [&>table]:rounded-lg [&>table]:overflow-hidden [&>table]:my-2 [&>table>thead]:bg-primary/10 [&>table>thead>tr>th]:px-3 [&>table>thead>tr>th]:py-2 [&>table>thead>tr>th]:text-left [&>table>thead>tr>th]:text-xs [&>table>thead>tr>th]:font-semibold [&>table>thead>tr>th]:text-foreground [&>table>tbody>tr>td]:px-3 [&>table>tbody>tr>td]:py-2 [&>table>tbody>tr>td]:text-xs [&>table>tbody>tr>td]:border-t [&>table>tbody>tr>td]:border-border [&>table>tbody>tr]:hover:bg-muted/50">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                   </div>
                 </div>
                 {msg.trials && msg.trials.length > 0 && msg.trials.map((trial) => (
