@@ -43,7 +43,7 @@ export const AssistantProvider = ({ children }: { children: ReactNode }) => {
     {
       id: "welcome",
       role: "assistant",
-      content: "Hi there! 👋 I'm here to help you find clinical trials in Canada. Let's start — what type of cancer have you been diagnosed with?",
+      content: "Hi there 👋 I'm here to help you find clinical trials in Canada. I know navigating this can feel overwhelming, so I'll keep things simple. To start — what type of cancer have you been diagnosed with?",
     },
   ]);
   const [mapTrials, setMapTrials] = useState<Trial[]>([]);
