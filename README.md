@@ -181,84 +181,201 @@ npm run preview
 ### 1. Conversational Flow
 
 ```mermaid
-User Message → Groq API → Extract Info → Update Profile → Check Completeness
-                                                                    ↓
-                                                            Profile Complete?
-                                                                    ↓
-                                                            Search Trials
-                                                                    ↓
-                                                            Rank & Display
+graph TD
+    A[User Message] --> B[Groq API]
+    B --> C[Extract Info]
+    C --> D[Update Profile]
+    D --> E{Profile Complete?}
+    E -->|No| F[Ask Next Question]
+    F --> A
+    E -->|Yes| G[Search Trials]
+    G --> H[Rank & Display]
 ```
 
 **7-Step Profile Collection:**
-1. Cancer Type (e.g., Lung, Breast, Colorectal)
-2. Disease Stage (Stage I-IV)
-3. Age
-4. Location (City + Province)
-5. Biomarkers (EGFR, PD-L1, etc.)
-6. Diagnosis Date
-7. Confirmation & Search
+1. **Cancer Type** (e.g., Lung, Breast, Colorectal)
+2. **Disease Stage** (Stage I-IV)
+3. **Age** (18-120 years)
+4. **Location** (City + Province in Canada)
+5. **Biomarkers** (EGFR, PD-L1, KRAS, HER2, etc.)
+6. **Diagnosis Date** (approximate date or period)
+7. **Confirmation & Search** (user confirms details)
+
+**Example Conversation:**
+```
+Assistant: Hi there! 👋 What type of cancer have you been diagnosed with?
+User: I have lung cancer
+Assistant: I'm sorry to hear that. What stage has your oncologist identified?
+User: Stage 3
+Assistant: Thank you. How old are you, if you don't mind?
+User: I'm 58 years old
+Assistant: Which city in Canada are you located in?
+User: Toronto
+Assistant: Do you know any of your biomarkers, like EGFR or PD-L1?
+User: EGFR positive
+Assistant: When were you first diagnosed?
+User: About 6 months ago
+Assistant: [Shows confirmation table with all details]
+User: Yes, that's correct
+Assistant: Perfect! Let me search for matching trials now. 🔍
+```
 
 ### 2. Medical Report Processing
 
 ```mermaid
-Upload PDF/Image → Compress → Vision AI (Llama 4 Scout) → Extract JSON
-                                                                ↓
-                                                        Parse & Validate
-                                                                ↓
-                                                        Pre-fill Profile
-                                                                ↓
-                                                        Ask Missing Fields
+graph LR
+    A[Upload PDF/Image] --> B[Compress to <1MB]
+    B --> C[Vision AI<br/>Llama 4 Scout]
+    C --> D[Extract JSON]
+    D --> E[Parse & Validate]
+    E --> F[Pre-fill Profile]
+    F --> G[Ask Missing Fields]
 ```
 
 **Supported Formats:**
-- PDF documents (first page extracted)
-- Images: JPG, PNG, GIF, WebP
-- Automatic compression to <1MB
-- OCR with medical terminology understanding
+- **PDF documents** - First page extracted and rendered to image
+- **Images** - JPG, PNG, GIF, WebP (automatically compressed)
+- **Max size** - Files compressed to ~1MB for optimal processing
+- **OCR capability** - Understands medical terminology and report formats
+
+**Extracted Information:**
+- Patient name
+- Age
+- Cancer type
+- Disease stage
+- Biomarkers (EGFR, PD-L1, KRAS, HER2, BRCA1/2, ALK, ROS1, BRAF, etc.)
+- Diagnosis date
+- City and province
 
 ### 3. Trial Matching Algorithm
 
-```typescript
-Suitability Score = (
-  Cancer Type Match (40%) +
-  Stage Match (30%) +
-  Age Eligibility (15%) +
-  Biomarker Match (15%)
-) × 100
-
-Distance Score = 1 / (1 + distance_km / 100)
-
-Hybrid Score = (Suitability × 0.6) + (Distance × 0.4)
+```mermaid
+graph TD
+    A[Patient Profile] --> B[Calculate Suitability Score]
+    A --> C[Calculate Distance]
+    B --> D[Cancer Type Match 40%]
+    B --> E[Stage Match 30%]
+    B --> F[Age Eligibility 15%]
+    B --> G[Biomarker Match 15%]
+    D --> H[Total Score 0-100%]
+    E --> H
+    F --> H
+    G --> H
+    C --> I[Distance Score]
+    H --> J[Hybrid Ranking]
+    I --> J
+    J --> K[Ranked Trial List]
 ```
 
+**Scoring Breakdown:**
+- **Excellent Match** (75-100%): 🟢 Green marker - Highly suitable
+- **Good Match** (50-74%): 🟠 Orange marker - Suitable with some criteria
+- **Fair Match** (25-49%): 🔵 Blue marker - Partially suitable
+- **Limited Match** (<25%): ⚪ Gray marker - Few matching criteria
+
 **Ranking Options:**
-- **Nearest**: Sorted by distance only
-- **Best Match**: Sorted by suitability score only
+- **Nearest**: Sorted by distance only (closest first)
+- **Best Match**: Sorted by suitability score only (highest match first)
 - **Recruiting**: Filtered by active recruitment status
-- **Best & Nearest**: Hybrid ranking (default)
+- **Best & Nearest**: Hybrid ranking combining both factors (default)
+- **All Trials**: Shows all matching trials
 
 ### 4. Dual API Key System
 
-```typescript
-Request → Try Primary Key
-            ↓
-        Rate Limited? (429)
-            ↓
-        Switch to Backup Key
-            ↓
-        Retry Request
-            ↓
-        Success!
-            ↓
-        Reset to Primary (after 5 min)
+```mermaid
+sequenceDiagram
+    participant User
+    participant App
+    participant Primary as Primary API Key
+    participant Backup as Backup API Key
+    
+    User->>App: Send Message
+    App->>Primary: API Request
+    alt Success
+        Primary-->>App: Response
+        App-->>User: Display Result
+    else Rate Limited (429)
+        Primary-->>App: Rate Limit Error
+        App->>App: Switch to Backup Key
+        App->>Backup: Retry Request
+        Backup-->>App: Response
+        App-->>User: Display Result
+    end
+    
+    Note over App,Backup: After 5 minutes
+    App->>App: Reset to Primary Key
 ```
 
 **Benefits:**
-- Doubles effective API quota
-- Zero downtime during rate limits
-- Automatic recovery
-- Transparent to users
+- **Doubles API Quota**: Effectively 2x the request limit
+- **Zero Downtime**: Seamless switching during rate limits
+- **Automatic Recovery**: Resets to primary key every 5 minutes
+- **Transparent**: Users never see rate limit errors
+- **Smart Retry**: Exponential backoff on failures
+
+**How It Works:**
+1. All requests start with primary API key
+2. If rate limit (HTTP 429) detected → switch to backup key
+3. Retry the same request immediately with backup key
+4. Continue using backup key for subsequent requests
+5. Every 5 minutes, attempt to reset to primary key
+6. If primary key works → switch back, if not → stay on backup
+
+### 5. Geocoding & Location Services
+
+```mermaid
+graph TD
+    A[City Name Input] --> B{Check Cache}
+    B -->|Found| C[Return Cached Coordinates]
+    B -->|Not Found| D[Nominatim API]
+    D --> E[Parse Response]
+    E --> F{Valid?}
+    F -->|Yes| G[Cache Result]
+    F -->|No| H[Use Canada Center]
+    G --> I[Return Coordinates]
+    H --> I
+```
+
+**Features:**
+- **City-to-Coordinates**: Converts "Toronto, Ontario" → (43.6532, -79.3832)
+- **Caching**: Stores geocoded locations to reduce API calls
+- **Fallback**: Uses Canada center (56.1304, -106.3468) if geocoding fails
+- **Province Support**: Handles all Canadian provinces and territories
+- **Accuracy**: Precise coordinates for accurate distance calculations
+
+### 6. System Architecture
+
+```mermaid
+graph TB
+    subgraph "Frontend"
+        A[React App] --> B[Chat Panel]
+        A --> C[Map Panel]
+        A --> D[Trial Summary]
+        B --> E[Assistant Context]
+        C --> E
+        D --> E
+    end
+    
+    subgraph "AI Services"
+        F[Groq API] --> G[Llama 3.3 70B<br/>Chat Model]
+        F --> H[Llama 4 Scout<br/>Vision Model]
+    end
+    
+    subgraph "External APIs"
+        I[OpenStreetMap<br/>Map Tiles]
+        J[OSRM<br/>Routing]
+        K[Nominatim<br/>Geocoding]
+    end
+    
+    E --> F
+    C --> I
+    C --> J
+    E --> K
+    
+    style A fill:#3b82f6
+    style F fill:#10b981
+    style I fill:#f59e0b
+```
 
 ## 🎨 UI/UX Features
 
