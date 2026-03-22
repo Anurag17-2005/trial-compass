@@ -33,6 +33,7 @@ const Header = ({ userProfile, onProfileUpdate }: HeaderProps) => {
           </Link>
           <Link
             to="/assistant"
+            data-tour="nav-ai-assistant"
             className={location.pathname === "/assistant" ? "nav-link font-semibold" : "nav-link"}
           >
             AI Assistant

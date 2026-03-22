@@ -9,6 +9,30 @@ const CHAT_MODEL = "llama-3.3-70b-versatile";
 const MAX_IMAGE_DIMENSION = 1024;
 const JPEG_QUALITY = 0.82;
 
+// Health check function to verify Groq API is responding
+export async function checkGroqHealth(): Promise<boolean> {
+  try {
+    const response = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${GROQ_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: CHAT_MODEL,
+        messages: [{ role: "user", content: "ping" }],
+        max_tokens: 5,
+        temperature: 0,
+      }),
+    });
+
+    return response.ok;
+  } catch (error) {
+    console.error("Groq health check failed:", error);
+    return false;
+  }
+}
+
 export interface ConversationMessage {
   role: "system" | "user" | "assistant";
   content: string;

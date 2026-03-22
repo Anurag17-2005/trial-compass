@@ -367,7 +367,7 @@ const MapPanel = forwardRef<MapPanelRef, MapPanelProps>(
     };
 
     return (
-      <div className="h-full w-full flex flex-col relative overflow-hidden bg-background">
+      <div data-tour="map-panel" className="h-full w-full flex flex-col relative overflow-hidden bg-background">
         <div
           ref={containerRef}
           className="flex-1 w-full"
