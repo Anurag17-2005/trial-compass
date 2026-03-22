@@ -1,6 +1,7 @@
 import { UserProfile } from "@/data/types";
 
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || "";
+const GROQ_API_KEY_BACKUP = import.meta.env.VITE_GROQ_API_KEY_BACKUP || "";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 const VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
@@ -9,24 +10,63 @@ const CHAT_MODEL = "llama-3.3-70b-versatile";
 const MAX_IMAGE_DIMENSION = 1024;
 const JPEG_QUALITY = 0.82;
 
+// Track which API key is currently active
+let currentApiKey = GROQ_API_KEY;
+let isUsingBackup = false;
+
+// Function to get the current API key
+function getApiKey(): string {
+  return currentApiKey;
+}
+
+// Function to switch to backup key
+function switchToBackupKey(): boolean {
+  if (!isUsingBackup && GROQ_API_KEY_BACKUP) {
+    console.log("Switching to backup API key due to rate limit");
+    currentApiKey = GROQ_API_KEY_BACKUP;
+    isUsingBackup = true;
+    return true;
+  }
+  return false;
+}
+
+// Function to reset to primary key (call this periodically or after cooldown)
+export function resetToPrimaryKey(): void {
+  if (isUsingBackup && GROQ_API_KEY) {
+    console.log("Resetting to primary API key");
+    currentApiKey = GROQ_API_KEY;
+    isUsingBackup = false;
+  }
+}
+
+// Get current key status for debugging
+export function getKeyStatus(): { isUsingBackup: boolean; hasBackup: boolean } {
+  return {
+    isUsingBackup,
+    hasBackup: !!GROQ_API_KEY_BACKUP
+  };
+}
+
 // Health check function to verify Groq API is responding
 export async function checkGroqHealth(): Promise<boolean> {
+  // Simple check: verify API key exists and is properly formatted
+  const apiKey = getApiKey();
+  if (!apiKey || apiKey.length < 20) {
+    return false;
+  }
+  
   try {
+    // Just check if we can reach the API endpoint with a HEAD request
+    // This doesn't consume tokens
     const response = await fetch(GROQ_URL, {
-      method: "POST",
+      method: "HEAD",
       headers: {
-        "Authorization": `Bearer ${GROQ_API_KEY}`,
-        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: CHAT_MODEL,
-        messages: [{ role: "user", content: "ping" }],
-        max_tokens: 5,
-        temperature: 0,
-      }),
     });
 
-    return response.ok;
+    // If we get any response (even 405 Method Not Allowed), the API is reachable
+    return response.status !== 0;
   } catch (error) {
     console.error("Groq health check failed:", error);
     return false;
@@ -258,18 +298,24 @@ export async function extractProfileFromFile(file: File): Promise<Partial<Conver
 
   const base64 = isPdf ? await processPdfFile(file) : await processImageFile(file);
 
-  const response = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: VISION_MODEL,
-      max_tokens: 800,
-      temperature: 0.1,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } },
-          { type: "text", text: `You are a medical data extractor. Extract patient information from this medical/pathology/lab report.
+  // Try with automatic fallback to backup key
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const apiKey = getApiKey();
+      const response = await fetch(GROQ_URL, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: VISION_MODEL,
+          max_tokens: 800,
+          temperature: 0.1,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } },
+              { type: "text", text: `You are a medical data extractor. Extract patient information from this medical/pathology/lab report.
 
 Return ONLY a valid JSON object. Use null if a field is not found.
 
@@ -285,32 +331,49 @@ Return ONLY a valid JSON object. Use null if a field is not found.
 }
 
 Return ONLY the JSON. No explanation, no markdown, no extra text.` },
-        ],
-      }],
-    }),
-  });
+            ],
+          }],
+        }),
+      });
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Groq vision API error ${response.status}: ${err}`);
+      if (!response.ok) {
+        // Check if it's a rate limit error (429)
+        if (response.status === 429 && attempt === 0 && switchToBackupKey()) {
+          console.log("Rate limit hit on file extraction, retrying with backup key...");
+          continue;
+        }
+        const err = await response.text();
+        throw new Error(`Groq vision API error ${response.status}: ${err}`);
+      }
+
+      const data = await response.json();
+      const text = data.choices?.[0]?.message?.content || "{}";
+      const clean = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+
+      const result: Partial<ConversationState> = {};
+      if (parsed.patient_name && typeof parsed.patient_name === "string") result.patient_name = parsed.patient_name;
+      if (parsed.age && typeof parsed.age === "number" && parsed.age >= 1 && parsed.age <= 120) result.age = parsed.age;
+      if (parsed.cancer_type && typeof parsed.cancer_type === "string") result.cancer_type = parsed.cancer_type;
+      if (parsed.disease_stage && typeof parsed.disease_stage === "string") result.disease_stage = parsed.disease_stage;
+      if (Array.isArray(parsed.biomarkers) && parsed.biomarkers.length > 0) result.biomarkers = parsed.biomarkers;
+      if (parsed.diagnosis_date && typeof parsed.diagnosis_date === "string") result.diagnosis_date = parsed.diagnosis_date;
+      if (parsed.city && typeof parsed.city === "string") result.city = parsed.city;
+      if (parsed.province && typeof parsed.province === "string") result.province = parsed.province;
+
+      return result;
+    } catch (error) {
+      lastError = error as Error;
+      if (attempt === 0 && !isUsingBackup && GROQ_API_KEY_BACKUP) {
+        switchToBackupKey();
+        console.log("Error on file extraction, retrying with backup key...");
+        continue;
+      }
+      break;
+    }
   }
 
-  const data = await response.json();
-  const text = data.choices?.[0]?.message?.content || "{}";
-  const clean = text.replace(/```json|```/g, "").trim();
-  const parsed = JSON.parse(clean);
-
-  const result: Partial<ConversationState> = {};
-  if (parsed.patient_name && typeof parsed.patient_name === "string") result.patient_name = parsed.patient_name;
-  if (parsed.age && typeof parsed.age === "number" && parsed.age >= 1 && parsed.age <= 120) result.age = parsed.age;
-  if (parsed.cancer_type && typeof parsed.cancer_type === "string") result.cancer_type = parsed.cancer_type;
-  if (parsed.disease_stage && typeof parsed.disease_stage === "string") result.disease_stage = parsed.disease_stage;
-  if (Array.isArray(parsed.biomarkers) && parsed.biomarkers.length > 0) result.biomarkers = parsed.biomarkers;
-  if (parsed.diagnosis_date && typeof parsed.diagnosis_date === "string") result.diagnosis_date = parsed.diagnosis_date;
-  if (parsed.city && typeof parsed.city === "string") result.city = parsed.city;
-  if (parsed.province && typeof parsed.province === "string") result.province = parsed.province;
-
-  return result;
+  throw lastError || new Error("Failed to extract profile from file");
 }
 
 export class GroqChatService {
@@ -371,23 +434,43 @@ export class GroqChatService {
     this.history.push({ role: "user", content: userMessage });
     this.extractInfo(userMessage);
 
-    try {
-      const res = await fetch(GROQ_URL, {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model: CHAT_MODEL, messages: this.history, max_tokens: 400, temperature: 0.5 }),
-      });
-      if (!res.ok) throw new Error(`Groq API error: ${res.status}`);
-      const data = await res.json();
-      const reply = data.choices?.[0]?.message?.content || "Could you try again?";
-      this.history.push({ role: "assistant", content: reply });
-      this.extractDiagnosisDateFromContext(userMessage);
-      const shouldSearch = reply.includes("Let me search for matching trials now") || reply.includes("search for matching trials now");
-      return { response: reply, state: this.state, shouldSearch };
-    } catch (error) {
-      console.error("Groq error:", error);
-      return { response: "I'm having a brief connection issue. Could you try again?", state: this.state, shouldSearch: false };
+    // Try with automatic fallback to backup key
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const apiKey = getApiKey();
+        const res = await fetch(GROQ_URL, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ model: CHAT_MODEL, messages: this.history, max_tokens: 400, temperature: 0.5 }),
+        });
+        
+        if (!res.ok) {
+          // Check if it's a rate limit error (429)
+          if (res.status === 429 && attempt === 0 && switchToBackupKey()) {
+            console.log("Rate limit hit on chat, retrying with backup key...");
+            continue;
+          }
+          throw new Error(`Groq API error: ${res.status}`);
+        }
+        
+        const data = await res.json();
+        const reply = data.choices?.[0]?.message?.content || "Could you try again?";
+        this.history.push({ role: "assistant", content: reply });
+        this.extractDiagnosisDateFromContext(userMessage);
+        const shouldSearch = reply.includes("Let me search for matching trials now") || reply.includes("search for matching trials now");
+        return { response: reply, state: this.state, shouldSearch };
+      } catch (error) {
+        if (attempt === 0 && !isUsingBackup && GROQ_API_KEY_BACKUP) {
+          switchToBackupKey();
+          console.log("Error on chat, retrying with backup key...");
+          continue;
+        }
+        console.error("Groq error:", error);
+        return { response: "I'm having a brief connection issue. Could you try again?", state: this.state, shouldSearch: false };
+      }
     }
+    
+    return { response: "I'm having a brief connection issue. Could you try again?", state: this.state, shouldSearch: false };
   }
 
   private extractDiagnosisDateFromContext(msg: string) {

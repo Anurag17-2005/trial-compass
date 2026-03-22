@@ -3,7 +3,7 @@ import { ChatMessage, Trial, UserProfile } from "@/data/types";
 import { trials } from "@/data/trials";
 import { getRankedByBoth, getNearestTrials, getRankedTrials } from "@/lib/trialMatching";
 import { useAssistant } from "@/contexts/AssistantContext";
-import { ConversationState, extractProfileFromFile } from "@/lib/groqService";
+import { ConversationState, extractProfileFromFile, checkGroqHealth, resetToPrimaryKey } from "@/lib/groqService";
 import TrialResultCard from "./TrialResultCard";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -45,16 +45,22 @@ function getStepIndex(state: ConversationState, searchDone: boolean): number {
 function ProgressBar({ state, searchDone }: { state: ConversationState; searchDone: boolean }) {
   const currentStep = getStepIndex(state, searchDone);
   const pct = Math.min(Math.round((currentStep / 7) * 100), 100);
+
   return (
     <div className="px-4 py-3 border-b border-border bg-secondary/20">
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-xs font-medium text-muted-foreground">
           {searchDone ? "Profile complete" : `Step ${Math.min(currentStep + 1, 7)} of 7`}
         </span>
-        <span className="text-xs font-semibold text-primary">{searchDone ? "✓ Matched" : `${pct}%`}</span>
+        <span className="text-xs font-semibold text-primary">
+          {searchDone ? "✓ Matched" : `${pct}%`}
+        </span>
       </div>
       <div className="relative h-1.5 bg-border rounded-full overflow-hidden mb-2">
-        <div className="absolute left-0 top-0 h-full bg-primary rounded-full transition-all duration-500 ease-out" style={{ width: `${pct}%` }} />
+        <div
+          className="absolute left-0 top-0 h-full bg-primary rounded-full transition-all duration-500 ease-out"
+          style={{ width: `${pct}%` }}
+        />
       </div>
       <div className="flex items-center justify-between">
         {STEPS.map((step, idx) => {
@@ -62,18 +68,28 @@ function ProgressBar({ state, searchDone }: { state: ConversationState; searchDo
           const active = currentStep === idx && !searchDone;
           return (
             <div key={step.key} className="flex flex-col items-center gap-0.5" style={{ flex: 1 }}>
-              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold transition-all duration-300 ${done ? "bg-primary text-primary-foreground shadow-sm" : active ? "bg-primary/20 text-primary border-2 border-primary animate-pulse" : "bg-border text-muted-foreground"}`}>
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold transition-all duration-300 ${
+                done ? "bg-primary text-primary-foreground shadow-sm" :
+                active ? "bg-primary/20 text-primary border-2 border-primary animate-pulse" :
+                "bg-border text-muted-foreground"
+              }`}>
                 {done ? "✓" : step.icon}
               </div>
-              <span className={`text-[8px] font-medium leading-none text-center ${done || active ? "text-primary" : "text-muted-foreground"}`}>{step.label}</span>
+              <span className={`text-[8px] font-medium leading-none text-center ${done || active ? "text-primary" : "text-muted-foreground"}`}>
+                {step.label}
+              </span>
             </div>
           );
         })}
         <div className="flex flex-col items-center gap-0.5" style={{ flex: 1 }}>
-          <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold transition-all duration-300 ${searchDone ? "bg-emerald-500 text-white shadow-sm" : "bg-border text-muted-foreground"}`}>
+          <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold transition-all duration-300 ${
+            searchDone ? "bg-emerald-500 text-white shadow-sm" : "bg-border text-muted-foreground"
+          }`}>
             {searchDone ? "🎯" : "🔍"}
           </div>
-          <span className={`text-[8px] font-medium leading-none ${searchDone ? "text-emerald-600" : "text-muted-foreground"}`}>Results</span>
+          <span className={`text-[8px] font-medium leading-none ${searchDone ? "text-emerald-600" : "text-muted-foreground"}`}>
+            Results
+          </span>
         </div>
       </div>
     </div>
@@ -83,6 +99,7 @@ function ProgressBar({ state, searchDone }: { state: ConversationState; searchDo
 // ── Confirmation table renderer ────────────────────────────────────────────
 function ConfirmationTable({ content }: { content: string }) {
   const hasTable = content.includes("| Detail |") || content.includes("|---|") || (content.includes("|") && content.includes("Cancer Type"));
+
   if (!hasTable) {
     return (
       <div className="text-sm prose prose-sm max-w-none [&>p]:m-0 [&>ul]:m-0 [&>ol]:m-0 [&>table]:w-full [&>table]:border-collapse [&>table]:rounded-lg [&>table]:overflow-hidden [&>table]:my-2 [&>table>thead]:bg-primary/10 [&>table>thead>tr>th]:px-3 [&>table>thead>tr>th]:py-2 [&>table>thead>tr>th]:text-left [&>table>thead>tr>th]:text-xs [&>table>thead>tr>th]:font-semibold [&>table>tbody>tr>td]:px-3 [&>table>tbody>tr>td]:py-2 [&>table>tbody>tr>td]:text-xs [&>table>tbody>tr>td]:border-t [&>table>tbody>tr>td]:border-border [&>table>tbody>tr]:hover:bg-muted/50">
@@ -90,9 +107,11 @@ function ConfirmationTable({ content }: { content: string }) {
       </div>
     );
   }
+
   const lines = content.split("\n");
   const tableRows: { detail: string; value: string }[] = [];
   let inTable = false, preText = "", postText = "", passedTable = false;
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (line.startsWith("| Detail |") || line.startsWith("| **Detail**")) { inTable = true; continue; }
@@ -100,19 +119,24 @@ function ConfirmationTable({ content }: { content: string }) {
     if (inTable && line.startsWith("|") && line.endsWith("|")) {
       const parts = line.split("|").map(p => p.trim()).filter(Boolean);
       if (parts.length >= 2) tableRows.push({ detail: parts[0], value: parts[1] });
-    } else if (inTable && !line.startsWith("|")) { inTable = false; passedTable = true; postText += lines[i] + "\n"; }
-    else if (!inTable && !passedTable) { preText += lines[i] + "\n"; }
+    } else if (inTable && !line.startsWith("|")) {
+      inTable = false; passedTable = true; postText += lines[i] + "\n";
+    } else if (!inTable && !passedTable) { preText += lines[i] + "\n"; }
     else if (passedTable) { postText += lines[i] + "\n"; }
   }
+
   const iconMap: Record<string, string> = { "Cancer Type": "🎗️", "Stage": "📊", "Age": "👤", "Location": "📍", "Biomarkers": "🧬", "Diagnosis Date": "📅" };
   const colorMap: Record<string, string> = { "Cancer Type": "bg-rose-50", "Stage": "bg-purple-50", "Age": "bg-blue-50", "Location": "bg-teal-50", "Biomarkers": "bg-amber-50", "Diagnosis Date": "bg-indigo-50" };
   const borderMap: Record<string, string> = { "Cancer Type": "border-l-rose-300", "Stage": "border-l-purple-300", "Age": "border-l-blue-300", "Location": "border-l-teal-300", "Biomarkers": "border-l-amber-300", "Diagnosis Date": "border-l-indigo-300" };
+
   return (
     <div className="space-y-3">
       {preText.trim() && <div className="text-sm prose prose-sm max-w-none [&>p]:m-0"><ReactMarkdown remarkPlugins={[remarkGfm]}>{preText.trim()}</ReactMarkdown></div>}
       {tableRows.length > 0 && (
         <div className="rounded-xl border border-border overflow-hidden shadow-sm">
-          <div className="bg-primary px-4 py-2.5"><span className="text-primary-foreground text-sm font-semibold">Your Profile Summary</span></div>
+          <div className="bg-primary px-4 py-2.5">
+            <span className="text-primary-foreground text-sm font-semibold">Your Profile Summary</span>
+          </div>
           <div className="divide-y divide-border">
             {tableRows.map((row, idx) => (
               <div key={idx} className={`flex items-center gap-3 px-4 py-3 ${colorMap[row.detail] || "bg-white"} border-l-2 ${borderMap[row.detail] || "border-l-gray-300"}`}>
@@ -184,10 +208,63 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
   const [isExtracting, setIsExtracting] = useState(false);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [convState, setConvState] = useState<ConversationState>({ isComplete: false });
+  const [isOnline, setIsOnline] = useState<boolean | null>(null); // null = checking, true = online, false = offline
+  const [lastErrorTime, setLastErrorTime] = useState<number>(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const trialCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Check Groq health only on mount and after errors
+  useEffect(() => {
+    const checkHealth = async () => {
+      const healthy = await checkGroqHealth();
+      const wasOffline = isOnline === false;
+      setIsOnline(healthy);
+      
+      // If it just went offline, add a message
+      if (!healthy && isOnline !== false) {
+        setMessages(prev => [...prev, {
+          id: `offline-${Date.now()}`,
+          role: "assistant",
+          content: "⚠️ I'm having trouble connecting to the AI service. Please check your internet connection or try again in a moment."
+        }]);
+      }
+      
+      // If it just came back online after being offline
+      if (healthy && wasOffline) {
+        setMessages(prev => [...prev, {
+          id: `online-${Date.now()}`,
+          role: "assistant",
+          content: "✅ Connection restored! I'm back online and ready to help."
+        }]);
+      }
+    };
+    
+    // Check on mount
+    checkHealth();
+  }, [isOnline, setMessages]);
+
+  // Recheck health after errors (with debounce)
+  useEffect(() => {
+    if (lastErrorTime > 0) {
+      const timer = setTimeout(async () => {
+        const healthy = await checkGroqHealth();
+        setIsOnline(healthy);
+      }, 2000); // Wait 2 seconds after error before rechecking
+      
+      return () => clearTimeout(timer);
+    }
+  }, [lastErrorTime]);
+
+  // Periodically try to reset to primary key (every 5 minutes)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      resetToPrimaryKey();
+    }, 5 * 60 * 1000); // 5 minutes
+    
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const lastMsg = messages[messages.length - 1];
@@ -202,18 +279,11 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
     }
   }, [selectedTrialId]);
 
-  // ── Now async — real geocoding ─────────────────────────────────────────
   const buildProfile = useCallback(async (): Promise<UserProfile> => {
-    const coords = await chatService.getCityCoordinates(); // async geocode
+    const coords = await chatService.getCityCoordinates();
     const profileUpdates = chatService.buildUserProfile();
     const state = chatService.getState();
-    return {
-      ...(userProfile || {} as UserProfile),
-      ...profileUpdates,
-      latitude: coords.latitude,
-      longitude: coords.longitude,
-      location: `${state.city || ""}, ${state.province || ""}`,
-    };
+    return { ...(userProfile || {} as UserProfile), ...profileUpdates, latitude: coords.latitude, longitude: coords.longitude, location: `${state.city || ""}, ${state.province || ""}` };
   }, [chatService, userProfile]);
 
   const performTrialSearch = useCallback(async () => {
@@ -224,8 +294,7 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
       return true;
     });
     if (found.length === 0 && state.cancer_type) found = trials.filter(t => t.cancer_type.toLowerCase().includes(state.cancer_type!.toLowerCase()));
-
-    const updatedProfile = await buildProfile(); // await real coords
+    const updatedProfile = await buildProfile();
     setUserProfile(updatedProfile);
     setProfileReady(true);
     setAllFoundTrials(found);
@@ -245,25 +314,36 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
     }
   }, [allFoundTrials]);
 
-  // ── File upload — PDF + images, always available ───────────────────────
+  // ── File upload — accepts PDF and images ──────────────────────────────
   const handleFileUpload = async (file: File) => {
     const isPdf = file.type === "application/pdf";
     const isImage = file.type.startsWith("image/");
+
     if (!isPdf && !isImage) {
-      setMessages(prev => [...prev, { id: Date.now().toString(), role: "assistant", content: "Please upload a PDF or image file (JPG, PNG, WebP) of your medical report." }]);
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(), role: "assistant",
+        content: "Please upload a PDF or an image file (JPG, PNG, WebP) of your medical report.",
+      }]);
       return;
     }
 
     setUploadedFileName(file.name);
     setIsExtracting(true);
-    setMessages(prev => [...prev, { id: Date.now().toString(), role: "user", content: `📎 Uploaded: ${file.name}` }]);
+
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(), role: "user",
+      content: `📎 Uploaded: ${file.name}`,
+    }]);
 
     try {
       const extracted = await extractProfileFromFile(file);
       const foundFields = Object.keys(extracted).filter(k => extracted[k as keyof typeof extracted] !== undefined);
 
       if (foundFields.length === 0) {
-        setMessages(prev => [...prev, { id: Date.now().toString(), role: "assistant", content: "I wasn't able to extract medical information from this file. Please try a clearer photo or PDF, or type your details directly." }]);
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(), role: "assistant",
+          content: "I wasn't able to extract medical information from this file. Please make sure it's a clear pathology or lab report. You can also type your details directly.",
+        }]);
         setIsExtracting(false);
         setUploadedFileName(null);
         return;
@@ -272,7 +352,6 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
       chatService.injectExtractedProfile(extracted);
       setConvState(chatService.getState());
 
-      // Update profile with real geocoded coordinates
       const profileUpdates = chatService.buildUserProfile();
       if (Object.keys(profileUpdates).length > 0) {
         const coords = await chatService.getCityCoordinates();
@@ -281,6 +360,10 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
 
       const result = await chatService.sendMessage("[Report processed, please acknowledge what was found and ask for missing fields]");
       setConvState(chatService.getState());
+      
+      // Mark as online after successful response
+      if (isOnline !== true) setIsOnline(true);
+
       setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: result.response }]);
 
       if (result.shouldSearch) {
@@ -294,11 +377,17 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
           trials: found.length > 0 ? found : undefined,
         }]);
       }
-    } catch (err) {
-      console.error("Extraction error:", err);
-      setMessages(prev => [...prev, { id: Date.now().toString(), role: "assistant", content: "I had trouble reading that file. Please try a clearer image or PDF, or type your details directly." }]);
+    } catch (error) {
+      console.error("Extraction error:", error);
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(), role: "assistant",
+        content: "I had trouble reading that file. Please try a clearer image or a different PDF, or just type your details directly.",
+      }]);
       setUploadedFileName(null);
+      setIsOnline(false);
+      setLastErrorTime(Date.now());
     }
+
     setIsExtracting(false);
   };
 
@@ -329,10 +418,13 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
 
       const result = await chatService.sendMessage(currentInput);
       setConvState(chatService.getState());
+      
+      // Mark as online after successful response
+      if (isOnline !== true) setIsOnline(true);
 
       if (result.shouldSearch) {
         setSearchDone(false); setAllFoundTrials([]);
-        const { found } = await performTrialSearch(); // await for real coords
+        const { found } = await performTrialSearch();
         setSearchDone(true);
         if (onTrialsFound) onTrialsFound(found);
         setMessages(prev => [...prev,
@@ -344,12 +436,11 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
           const profileUpdates = chatService.buildUserProfile();
           if (Object.keys(profileUpdates).length > 0) {
             const state = chatService.getState();
-            if (state.city) {
-              const coords = await chatService.getCityCoordinates(); // real geocode
-              setUserProfile({ ...userProfile, ...profileUpdates, latitude: coords.latitude, longitude: coords.longitude });
-            } else {
-              setUserProfile({ ...userProfile, ...profileUpdates });
+            if (state.city) { 
+              const coords = await chatService.getCityCoordinates(); 
+              setUserProfile({ ...userProfile, ...profileUpdates, latitude: coords.latitude, longitude: coords.longitude }); 
             }
+            else setUserProfile({ ...userProfile, ...profileUpdates });
           }
         }
         setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: result.response }]);
@@ -357,6 +448,8 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
     } catch (error) {
       console.error("Chat error:", error);
       setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: "Sorry, I'm having trouble connecting. Please try again." }]);
+      setIsOnline(false);
+      setLastErrorTime(Date.now());
     }
     setIsTyping(false);
   };
@@ -381,17 +474,48 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
         <div className="flex items-center justify-between">
           <div>
             <h2 className="font-bold text-foreground text-sm">AI Trial Assistant</h2>
-            <p className="text-xs text-muted-foreground">{searchDone ? "Ask about results or search a new cancer type" : "Tell me about your condition"}</p>
+            <p className="text-xs text-muted-foreground">
+              {searchDone ? "Ask about results or search a new cancer type" : "Tell me about your condition"}
+            </p>
           </div>
-          <div className="flex items-center gap-1 text-xs text-primary bg-primary/10 px-2 py-1 rounded-full">
-            <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
-            Online
+          <div className="flex items-center gap-2">
+            <div className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full ${
+              isOnline === null 
+                ? "text-muted-foreground bg-muted animate-pulse" 
+                : isOnline 
+                  ? "text-primary bg-primary/10" 
+                  : "text-destructive bg-destructive/10"
+            }`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${
+                isOnline === null 
+                  ? "bg-muted-foreground" 
+                  : isOnline 
+                    ? "bg-primary animate-pulse" 
+                    : "bg-destructive"
+              }`} />
+              {isOnline === null ? "Checking..." : isOnline ? "Online" : "Offline"}
+            </div>
+            {isOnline === false && (
+              <button
+                onClick={async () => {
+                  setIsOnline(null);
+                  const healthy = await checkGroqHealth();
+                  setIsOnline(healthy);
+                }}
+                className="text-xs px-2 py-1 rounded-full bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+                title="Retry connection"
+              >
+                Retry
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       {/* Progress bar */}
-      <ProgressBar state={convState} searchDone={searchDone} />
+      <div data-tour="progress-bar">
+        <ProgressBar state={convState} searchDone={searchDone} />
+      </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
@@ -418,7 +542,9 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
               {isExtracting ? (
                 <div className="flex gap-2 items-center">
                   <Loader2 className="w-3 h-3 animate-spin text-primary" />
-                  <span className="text-xs text-muted-foreground">Reading your report...</span>
+                  <span className="text-xs text-muted-foreground">
+                    Reading your report...
+                  </span>
                 </div>
               ) : (
                 <div className="flex gap-1">
@@ -442,40 +568,45 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
         </div>
       )}
 
-      {/* Input — upload button ALWAYS visible */}
+      {/* Input area — single row, no duplicate banner */}
       <div className="p-3 border-t border-border space-y-2">
         <div className="flex gap-2">
-          {/* Upload always available — tooltip changes after search */}
+          {/* Upload button - always visible */}
           <button
+            data-tour="upload-btn"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isExtracting}
-            title={searchDone ? "Upload a new report to start a fresh search (PDF or image)" : "Upload medical report — PDF or image (JPG, PNG)"}
-            className={`rounded-full border p-2.5 transition-colors disabled:opacity-50 flex-shrink-0 relative group ${
-              searchDone
-                ? "border-amber-300 text-amber-600 hover:bg-amber-50 hover:border-amber-400"
-                : "border-border text-muted-foreground hover:text-primary hover:border-primary hover:bg-primary/5"
-            }`}
+            disabled={isExtracting || isOnline === false}
+            title={isOnline === false ? "AI Assistant is offline" : "Upload medical report (PDF or image)"}
+            className="rounded-full border border-border p-2.5 text-muted-foreground hover:text-primary hover:border-primary hover:bg-primary/5 transition-colors disabled:opacity-50 flex-shrink-0"
           >
-            {isExtracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
-            {/* Tooltip */}
-            <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-foreground text-background text-[10px] rounded px-2 py-1 whitespace-nowrap shadow-lg z-50">
-              {searchDone ? "Upload new report" : "Upload PDF or image report"}
-            </span>
+            {isExtracting
+              ? <Loader2 className="w-4 h-4 animate-spin" />
+              : <Paperclip className="w-4 h-4" />
+            }
           </button>
 
           <input
             type="text"
+            data-tour="chat-input"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !isTyping && !isExtracting && handleSend()}
-            placeholder={searchDone ? "Ask about results or try a new cancer type..." : "Type your details or upload a report 📎"}
-            className="flex-1 rounded-full border border-input bg-background px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            disabled={isTyping || isExtracting}
+            onKeyDown={(e) => e.key === "Enter" && !isTyping && !isExtracting && isOnline && handleSend()}
+            placeholder={
+              isOnline === false 
+                ? "AI Assistant is offline. Please check your connection..." 
+                : searchDone 
+                  ? "Ask about results or try a new cancer type..." 
+                  : "Type your details or upload a report 📎"
+            }
+            className="flex-1 rounded-full border border-input bg-background px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={isTyping || isExtracting || isOnline === false}
           />
+
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isTyping || isExtracting}
+            disabled={!input.trim() || isTyping || isExtracting || isOnline === false}
             className="rounded-full bg-primary text-primary-foreground p-2.5 disabled:opacity-50 hover:opacity-90 transition-opacity flex-shrink-0"
+            title={isOnline === false ? "AI Assistant is offline" : "Send message"}
           >
             <Send className="w-4 h-4" />
           </button>
@@ -487,15 +618,23 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
           type="file"
           accept=".pdf,image/jpeg,image/png,image/gif,image/webp"
           className="hidden"
-          onChange={(e) => { const file = e.target.files?.[0]; if (file) handleFileUpload(file); e.target.value = ""; }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleFileUpload(file);
+            e.target.value = "";
+          }}
         />
 
-        {/* Dynamic chips */}
+        {/* Dynamic suggestion chips */}
         <div className="flex gap-2 flex-wrap">
           {suggestions.map((s) => (
-            <button key={s} onClick={() => setInput(s)} className="text-xs px-3 py-1.5 rounded-full border border-border text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">{s}</button>
+            <button key={s} onClick={() => setInput(s)}
+              className="text-xs px-3 py-1.5 rounded-full border border-border text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
+              {s}
+            </button>
           ))}
-          <button onClick={handleReset} className="text-xs px-3 py-1.5 rounded-full border border-border text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors flex items-center gap-1">
+          <button onClick={handleReset}
+            className="text-xs px-3 py-1.5 rounded-full border border-border text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors flex items-center gap-1">
             <RotateCcw className="w-3 h-3" />
             Start over
           </button>

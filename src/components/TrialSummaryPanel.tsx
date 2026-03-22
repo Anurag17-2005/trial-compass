@@ -25,11 +25,16 @@ const TrialSummaryPanel = ({ trial, userProfile, onClose }: TrialSummaryPanelPro
     );
   }
 
-  const suitability = calculateTrialSuitability(trial, userProfile);
-  const distance = calculateDistance(
-    userProfile.latitude, userProfile.longitude,
-    trial.latitude, trial.longitude
-  );
+  const suitability = userProfile && userProfile.latitude && userProfile.longitude 
+    ? calculateTrialSuitability(trial, userProfile)
+    : 0;
+    
+  const distance = userProfile && userProfile.latitude && userProfile.longitude
+    ? calculateDistance(
+        userProfile.latitude, userProfile.longitude,
+        trial.latitude, trial.longitude
+      )
+    : 0;
 
   const getSuitabilityLabel = (score: number) => {
     if (score >= 75) return { label: "Excellent Match", color: "bg-emerald-100 text-emerald-800" };
@@ -64,7 +69,9 @@ const TrialSummaryPanel = ({ trial, userProfile, onClose }: TrialSummaryPanelPro
             <Badge className={trial.recruitment_status === "Recruiting" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-700"}>
               {trial.recruitment_status}
             </Badge>
-            <Badge className={matchInfo.color}>{suitability}% — {matchInfo.label}</Badge>
+            {userProfile && userProfile.latitude && userProfile.longitude && (
+              <Badge className={matchInfo.color}>{suitability}% — {matchInfo.label}</Badge>
+            )}
             <Badge variant="secondary">{trial.phase}</Badge>
           </div>
         </div>
@@ -78,7 +85,9 @@ const TrialSummaryPanel = ({ trial, userProfile, onClose }: TrialSummaryPanelPro
           <div>
             <p className="text-muted-foreground font-medium">Location</p>
             <p className="text-foreground font-medium">{trial.city}, {trial.province}</p>
-            <p className="text-primary font-semibold">{distance.toFixed(1)} km away</p>
+            {userProfile && userProfile.latitude && userProfile.longitude && distance > 0 && (
+              <p className="text-primary font-semibold">{distance.toFixed(1)} km away</p>
+            )}
           </div>
           <div>
             <p className="text-muted-foreground font-medium">Treatment</p>

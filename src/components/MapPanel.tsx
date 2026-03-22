@@ -154,12 +154,12 @@ const MapPanel = forwardRef<MapPanelRef, MapPanelProps>(
           containerRef.current.innerHTML = "";
         }
 
-        const centerLat = userProfile?.latitude || 56.1304;
-        const centerLon = userProfile?.longitude || -106.3468;
+        const centerLat = 56.1304; // Default to center of Canada
+        const centerLon = -106.3468;
 
         mapRef.current = L.map(containerRef.current, {
           center: [centerLat, centerLon],
-          zoom: userProfile ? 6 : 4,
+          zoom: 4,
           scrollWheelZoom: true,
           zoomControl: true,
         });
@@ -172,30 +172,6 @@ const MapPanel = forwardRef<MapPanelRef, MapPanelProps>(
         markersRef.current = L.layerGroup().addTo(mapRef.current);
         routesRef.current = L.layerGroup().addTo(mapRef.current);
         initializedRef.current = true;
-
-        // Add user location marker if profile exists
-        if (userProfile) {
-          const userIcon = L.divIcon({
-            html: `<div style="position:relative;width:32px;height:40px;">
-              <svg width="32" height="40" viewBox="0 0 32 40" xmlns="http://www.w3.org/2000/svg">
-                <path d="M16 0C7.163 0 0 7.163 0 16c0 8.837 16 24 16 24s16-15.163 16-24C32 7.163 24.837 0 16 0z" fill="#ef4444"/>
-                <circle cx="16" cy="16" r="6" fill="white"/>
-              </svg>
-            </div>`,
-            className: "",
-            iconSize: [32, 40],
-            iconAnchor: [16, 40],
-            popupAnchor: [0, -40],
-          });
-          userMarkerRef.current = L.marker(
-            [userProfile.latitude, userProfile.longitude],
-            { icon: userIcon }
-          );
-          userMarkerRef.current.bindPopup(
-            `<div style="font-size:13px"><p style="font-weight:700;margin:0">${userProfile.name}</p><p style="color:#666;margin:0">${userProfile.city}, ${userProfile.province}</p></div>`
-          );
-          userMarkerRef.current.addTo(mapRef.current);
-        }
 
         // Trigger a resize to ensure map renders properly
         setTimeout(() => {
@@ -213,6 +189,45 @@ const MapPanel = forwardRef<MapPanelRef, MapPanelProps>(
         }
         initializedRef.current = false;
       };
+    }, []); // Only run once on mount
+
+    // Separate effect to handle user marker when profile changes
+    useEffect(() => {
+      if (!mapRef.current) return;
+
+      // Remove existing user marker if it exists
+      if (userMarkerRef.current) {
+        mapRef.current.removeLayer(userMarkerRef.current);
+        userMarkerRef.current = null;
+      }
+
+      // Add user location marker if profile exists and has valid coordinates
+      if (userProfile && userProfile.latitude && userProfile.longitude) {
+        const userIcon = L.divIcon({
+          html: `<div style="position:relative;width:32px;height:40px;">
+            <svg width="32" height="40" viewBox="0 0 32 40" xmlns="http://www.w3.org/2000/svg">
+              <path d="M16 0C7.163 0 0 7.163 0 16c0 8.837 16 24 16 24s16-15.163 16-24C32 7.163 24.837 0 16 0z" fill="#ef4444"/>
+              <circle cx="16" cy="16" r="6" fill="white"/>
+            </svg>
+          </div>`,
+          className: "",
+          iconSize: [32, 40],
+          iconAnchor: [16, 40],
+          popupAnchor: [0, -40],
+        });
+        
+        userMarkerRef.current = L.marker(
+          [userProfile.latitude, userProfile.longitude],
+          { icon: userIcon }
+        );
+        
+        const popupText = userProfile.city && userProfile.province
+          ? `<div style="font-size:13px"><p style="font-weight:700;margin:0">${userProfile.name || 'Your Location'}</p><p style="color:#666;margin:0">${userProfile.city}, ${userProfile.province}</p></div>`
+          : `<div style="font-size:13px"><p style="font-weight:700;margin:0">Your Location</p></div>`;
+        
+        userMarkerRef.current.bindPopup(popupText);
+        userMarkerRef.current.addTo(mapRef.current);
+      }
     }, [userProfile]);
 
     useEffect(() => {
