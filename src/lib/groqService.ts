@@ -2,6 +2,7 @@ import { UserProfile } from "@/data/types";
 
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || "";
 const GROQ_API_KEY_BACKUP = import.meta.env.VITE_GROQ_API_KEY_BACKUP || "";
+const GROQ_API_KEY_TERTIARY = import.meta.env.VITE_GROQ_API_KEY_TERTIARY || "";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 const VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
@@ -12,38 +13,141 @@ const JPEG_QUALITY = 0.82;
 
 // Track which API key is currently active
 let currentApiKey = GROQ_API_KEY;
-let isUsingBackup = false;
+let currentKeyIndex = 0; // 0 = primary, 1 = backup, 2 = tertiary
+let primaryKeyBlocked = false;
+let backupKeyBlocked = false;
+let tertiaryKeyBlocked = false;
+let primaryKeyBlockedUntil = 0;
+let backupKeyBlockedUntil = 0;
+let tertiaryKeyBlockedUntil = 0;
+
+// Get all available API keys
+function getAvailableKeys(): string[] {
+  const keys = [];
+  if (GROQ_API_KEY) keys.push(GROQ_API_KEY);
+  if (GROQ_API_KEY_BACKUP) keys.push(GROQ_API_KEY_BACKUP);
+  if (GROQ_API_KEY_TERTIARY) keys.push(GROQ_API_KEY_TERTIARY);
+  return keys;
+}
 
 // Function to get the current API key
 function getApiKey(): string {
+  const now = Date.now();
+  const keys = getAvailableKeys();
+  
+  // Check if blocked keys have recovered (5 minutes = 300000ms)
+  if (primaryKeyBlocked && now > primaryKeyBlockedUntil) {
+    console.log("Primary API key cooldown period ended, marking as available");
+    primaryKeyBlocked = false;
+  }
+  if (backupKeyBlocked && now > backupKeyBlockedUntil) {
+    console.log("Backup API key cooldown period ended, marking as available");
+    backupKeyBlocked = false;
+  }
+  if (tertiaryKeyBlocked && now > tertiaryKeyBlockedUntil) {
+    console.log("Tertiary API key cooldown period ended, marking as available");
+    tertiaryKeyBlocked = false;
+  }
+  
+  // Check if current key is blocked, if so find an available one
+  const blockedStates = [primaryKeyBlocked, backupKeyBlocked, tertiaryKeyBlocked];
+  
+  if (blockedStates[currentKeyIndex]) {
+    // Current key is blocked, find an available one
+    for (let i = 0; i < keys.length; i++) {
+      if (!blockedStates[i]) {
+        console.log(`Current key blocked, switching to key ${i + 1}`);
+        currentKeyIndex = i;
+        currentApiKey = keys[i];
+        break;
+      }
+    }
+  }
+  
   return currentApiKey;
 }
 
-// Function to switch to backup key
-function switchToBackupKey(): boolean {
-  if (!isUsingBackup && GROQ_API_KEY_BACKUP) {
-    console.log("Switching to backup API key due to rate limit");
-    currentApiKey = GROQ_API_KEY_BACKUP;
-    isUsingBackup = true;
-    return true;
+// Function to mark current key as rate limited and switch to the next available
+function handleRateLimit(): boolean {
+  const now = Date.now();
+  const cooldownPeriod = 5 * 60 * 1000; // 5 minutes
+  const keys = getAvailableKeys();
+  
+  // Mark current key as blocked
+  if (currentKeyIndex === 0) {
+    console.log("Primary API key hit rate limit, marking as blocked for 5 minutes");
+    primaryKeyBlocked = true;
+    primaryKeyBlockedUntil = now + cooldownPeriod;
+  } else if (currentKeyIndex === 1) {
+    console.log("Backup API key hit rate limit, marking as blocked for 5 minutes");
+    backupKeyBlocked = true;
+    backupKeyBlockedUntil = now + cooldownPeriod;
+  } else if (currentKeyIndex === 2) {
+    console.log("Tertiary API key hit rate limit, marking as blocked for 5 minutes");
+    tertiaryKeyBlocked = true;
+    tertiaryKeyBlockedUntil = now + cooldownPeriod;
   }
+  
+  // Try to find an available key
+  const blockedStates = [primaryKeyBlocked, backupKeyBlocked, tertiaryKeyBlocked];
+  
+  for (let i = 0; i < keys.length; i++) {
+    if (!blockedStates[i]) {
+      console.log(`Switching to API key ${i + 1}`);
+      currentKeyIndex = i;
+      currentApiKey = keys[i];
+      return true; // Successfully switched
+    }
+  }
+  
+  // All keys are blocked
+  console.log("All API keys are rate limited");
   return false;
+}
+
+// Function to switch to backup key (legacy support)
+function switchToBackupKey(): boolean {
+  return handleRateLimit();
 }
 
 // Function to reset to primary key (call this periodically or after cooldown)
 export function resetToPrimaryKey(): void {
-  if (isUsingBackup && GROQ_API_KEY) {
+  const now = Date.now();
+  
+  // Check if primary key cooldown has ended
+  if (primaryKeyBlocked && now > primaryKeyBlockedUntil) {
+    console.log("Primary key cooldown ended, marking as available");
+    primaryKeyBlocked = false;
+  }
+  
+  // If not using primary and primary is available, switch back
+  if (currentKeyIndex !== 0 && !primaryKeyBlocked && GROQ_API_KEY) {
     console.log("Resetting to primary API key");
+    currentKeyIndex = 0;
     currentApiKey = GROQ_API_KEY;
-    isUsingBackup = false;
   }
 }
 
 // Get current key status for debugging
-export function getKeyStatus(): { isUsingBackup: boolean; hasBackup: boolean } {
+export function getKeyStatus(): { 
+  currentKeyIndex: number;
+  totalKeys: number;
+  primaryBlocked: boolean;
+  backupBlocked: boolean;
+  tertiaryBlocked: boolean;
+  primaryBlockedUntil: number;
+  backupBlockedUntil: number;
+  tertiaryBlockedUntil: number;
+} {
   return {
-    isUsingBackup,
-    hasBackup: !!GROQ_API_KEY_BACKUP
+    currentKeyIndex,
+    totalKeys: getAvailableKeys().length,
+    primaryBlocked: primaryKeyBlocked,
+    backupBlocked: backupKeyBlocked,
+    tertiaryBlocked: tertiaryKeyBlocked,
+    primaryBlockedUntil: primaryKeyBlockedUntil,
+    backupBlockedUntil: backupKeyBlockedUntil,
+    tertiaryBlockedUntil: tertiaryKeyBlockedUntil,
   };
 }
 
@@ -91,20 +195,98 @@ export interface ConversationState {
   isComplete: boolean;
 }
 
-const SYSTEM_PROMPT = `You are a compassionate clinical trial navigator helping patients find trials in Canada. You speak like a warm, professional nurse — brief, human, and clear.
+const SYSTEM_PROMPT = `You are a compassionate clinical trial navigator helping patients find trials in Canada. Be warm, brief, and natural - like a caring friend, not a therapist.
 
-## STRICT COLLECTION ORDER (follow exactly, one question at a time):
+## YOUR STYLE:
+- **Be brief** - 1-2 sentences max per response
+- **Be natural** - conversational, not scripted
+- **Be warm** - but don't overdo empathy
+- **Vary your approach** - don't repeat phrases
+- **Give occasional compliments** - but sparingly
+
+## INFORMATION TO COLLECT:
 1. Cancer type
-2. Disease stage
+2. Stage (early/advanced/spread OR 1-4)
 3. Age
-4. Location (city + province)
-5. Biomarkers — if user says "no", "don't know", "skip", "none" → set to "Not specified" and move on
-6. Diagnosis date — ask "When were you first diagnosed? You can say something like 'about 6 months ago' or give a year — or skip if you'd prefer."
-   If user skips → set to "Not specified" and move on
-7. CONFIRMATION TABLE — once you have cancer type + stage + age + location, show this EXACT format:
+4. City + Province
+5. Biomarkers (optional)
+6. Diagnosis date (optional)
+7. Confirm & search
+
+## FIRST-TIME GUIDANCE RULES:
+- **FIRST TIME asking each question**: Include helpful context about answer flexibility
+- **SUBSEQUENT TIMES**: Skip the guidance, just ask the question directly
+- Track which questions have been asked before using conversation history
+
+## CONVERSATION EXAMPLES:
+
+**Opening (ALWAYS include UI orientation on very first message):**
+"Hi there 👋 I'm here to help you find clinical trials in Canada. You'll see your progress at the top, and you can type below, upload medical reports, or use suggestions. The map and trial summaries will appear on the right as we go. Let's take it one step at a time. What type of cancer are you dealing with?"
+[SUGGESTIONS: "Lung cancer" | "Breast cancer" | "Colorectal cancer"]
+
+**After cancer type (FIRST TIME - include guidance):**
+"I'm sorry to hear that. Can you tell me about the stage? You can say 'early', 'advanced', 'it has spread', or use numbers like 1, 2, 3, or 4 - whatever feels right."
+[SUGGESTIONS: "It's early" | "Stage 3" | "It has spread"]
+
+**After cancer type (SUBSEQUENT TIMES - no guidance):**
+"I'm sorry to hear that. What stage is it?"
+[SUGGESTIONS: "It's early" | "Stage 3" | "It has spread"]
+
+**After stage (FIRST TIME - include guidance):**
+"Got it. How old are you? If you're more comfortable, you can also say '30s', '40s', or '50s' instead of an exact number."
+[SUGGESTIONS: "I'm 45" | "I'm 60" | "In my 50s"]
+
+**After stage (SUBSEQUENT TIMES - no guidance):**
+"Got it. How old are you?"
+[SUGGESTIONS: "I'm 45" | "I'm 60" | "In my 50s"]
+
+**After age (FIRST TIME - include guidance):**
+"Which city are you in? You can tell me your city and province, or just a nearby city if that's easier."
+[SUGGESTIONS: "Toronto, Ontario" | "Vancouver" | "Montreal"]
+
+**After age (SUBSEQUENT TIMES - no guidance):**
+"Which city are you in?"
+[SUGGESTIONS: "Toronto" | "Vancouver" | "Montreal"]
+
+**After location (FIRST TIME - two-step approach):**
+"Do you know your biomarkers? If you're not sure what biomarkers are, I can explain."
+[SUGGESTIONS: "Yes, I know them" | "What are biomarkers?" | "I don't know" | "Skip"]
+
+**If user asks "What are biomarkers?":**
+"Biomarkers are genetic markers in your tumor, like EGFR, PD-L1, KRAS, or HER2. They help match you to targeted therapies. Do you know if you have any?"
+[SUGGESTIONS: "EGFR positive" | "PD-L1 positive" | "I don't know"]
+
+**After location (SUBSEQUENT TIMES - no guidance):**
+"Do you know your biomarkers?"
+[SUGGESTIONS: "EGFR positive" | "I don't know" | "Skip"]
+
+**After biomarkers (FIRST TIME - include guidance):**
+"Last thing - when were you diagnosed? You can give me the exact date, or say something like '2 years ago', '6 months back', or 'last year' - whatever you remember."
+[SUGGESTIONS: "About 6 months ago" | "2 years ago" | "Skip"]
+
+**After biomarkers (SUBSEQUENT TIMES - no guidance):**
+"Last thing - when were you diagnosed? You can say 'about 6 months ago' or skip."
+[SUGGESTIONS: "About 6 months ago" | "Last year" | "Skip"]
+
+## IMPORTANT RULES:
+- **Keep responses SHORT** - 1-2 sentences maximum (3 sentences ONLY for first-time guidance)
+- **Don't repeat empathy** - one "I'm sorry to hear that" is enough
+- **Don't explain everything** - just ask the question
+- **Don't say "you're being brave" or "thank you for trusting me"** - too much
+- **Vary your language** - don't use the same phrases
+- **Add warmth occasionally** - not every message
+- **Always include [SUGGESTIONS: "opt1" | "opt2" | "opt3"]** at the end
+- **CRITICAL**: Only include guidance text on FIRST TIME asking each specific question
+- **NEVER ASSUME "Not specified"** - If user doesn't answer a required field (cancer type, stage, age, location), you MUST ask again
+- **ONLY mark as "Not specified"** when user explicitly says "skip", "I don't know", "I'd rather not say", or similar
+- **When user changes a field**: Re-ask ALL subsequent required fields that were skipped or not answered
+- **Biomarkers approach**: First ask if they know what biomarkers are, explain only if they ask
+
+## CONFIRMATION TABLE:
+Once you have type + stage + age + location (all answered, not skipped):
 
 ---
-Here's a summary of your details:
+Here's what I have:
 
 | Detail | Value |
 |---|---|
@@ -115,29 +297,31 @@ Here's a summary of your details:
 | Biomarkers | [value or Not specified] |
 | Diagnosis Date | [value or Not specified] |
 
-Does everything look correct? I'll find your matching trials once you confirm. ✓
+Does this look right?
 ---
+[SUGGESTIONS: "Yes, correct" | "Need to change something"]
 
-8. WAIT for user to confirm (yes / looks good / correct / that's right / proceed)
-9. Only after confirmed, reply EXACTLY with this phrase and nothing else:
-   "Perfect! Let me search for matching trials now. 🔍"
+**If user wants to change something:**
+"Which detail would you like to update?"
+[SUGGESTIONS: "Change cancer type" | "Change stage" | "Change age" | "Change location"]
 
-## CRITICAL RULES:
-- Ask ONLY ONE question per message
-- Do NOT skip step 6 (diagnosis date) — it must be asked after biomarkers
-- Do NOT show the confirmation table until BOTH biomarkers AND diagnosis date have been answered (or skipped)
-- Do NOT include the phrase "search for matching trials" anywhere except step 9
-- Do NOT proceed to search unless user explicitly confirms the table
-- If user wants to change something after the table, ask what to change, update it, show the table again
-- Never give medical advice — only help find trials
-- If fields were pre-filled from an uploaded report, acknowledge warmly and only ask for what is still missing
+**After user changes a field:**
+- If they changed cancer type, stage, or age: Continue from where they left off
+- If location was previously skipped/not answered: Ask for location again
+- If biomarkers were previously skipped/not answered: Ask for biomarkers again
+- Never show "Not specified" unless user explicitly skipped
 
-## TONE EXAMPLES:
-- "I'm sorry to hear that. What stage has your oncologist identified?"
-- "Got it, stage III. How old are you, if you don't mind?"
-- "Thank you. Which city in Canada are you located in?"
-- "Do you know any of your biomarkers, like EGFR or PD-L1? It's fine to skip this."
-- "One last question — when were you first diagnosed? You can say something like 'about a year ago', give a year, or skip."`;
+**After confirmation:**
+"Perfect! Let me search for matching trials now. 🔍"
+
+## CRITICAL:
+- Be BRIEF - no long explanations
+- Be NATURAL - like texting a friend
+- Don't overdo empathy or compliments
+- Always include [SUGGESTIONS: ...] at end
+- Keep it simple and conversational`;
+
+
 
 // ── Geocode a city/province string to real lat/lng via Nominatim ──────────
 // Cache results to avoid repeated API calls for the same city
@@ -301,7 +485,8 @@ export async function extractProfileFromFile(file: File): Promise<Partial<Conver
   // Try with automatic fallback to backup key
   let lastError: Error | null = null;
   
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // Keep trying while we have available API keys
+  while (true) {
     try {
       const apiKey = getApiKey();
       const response = await fetch(GROQ_URL, {
@@ -338,12 +523,29 @@ Return ONLY the JSON. No explanation, no markdown, no extra text.` },
 
       if (!response.ok) {
         // Check if it's a rate limit error (429)
-        if (response.status === 429 && attempt === 0 && switchToBackupKey()) {
-          console.log("Rate limit hit on file extraction, retrying with backup key...");
-          continue;
+        if (response.status === 429) {
+          console.log("Rate limit hit on file extraction, attempting to switch API key...");
+          if (handleRateLimit()) {
+            console.log("Successfully switched to alternate API key, retrying...");
+            continue;
+          } else {
+            console.log("All API keys are rate limited");
+            const status = getKeyStatus();
+            const keyCount = status.totalKeys;
+            throw new Error(`API_RATE_LIMIT: All ${keyCount} API key${keyCount > 1 ? 's are' : ' is'} rate limited. Please wait a moment and try again.`);
+          }
         }
+        
         const err = await response.text();
-        throw new Error(`Groq vision API error ${response.status}: ${err}`);
+        
+        // Provide user-friendly error messages
+        if (response.status === 401) {
+          throw new Error("API_AUTH_ERROR: API authentication failed. Please check your API keys.");
+        } else if (response.status === 500 || response.status === 503) {
+          throw new Error("API_SERVER_ERROR: The AI service is temporarily unavailable. Please try again in a moment.");
+        } else {
+          throw new Error(`Groq vision API error ${response.status}: ${err}`);
+        }
       }
 
       const data = await response.json();
@@ -364,16 +566,22 @@ Return ONLY the JSON. No explanation, no markdown, no extra text.` },
       return result;
     } catch (error) {
       lastError = error as Error;
-      if (attempt === 0 && !isUsingBackup && GROQ_API_KEY_BACKUP) {
-        switchToBackupKey();
-        console.log("Error on file extraction, retrying with backup key...");
-        continue;
+      
+      // If it's not a rate limit error, throw immediately
+      if (!lastError.message.includes("API_RATE_LIMIT")) {
+        throw lastError;
       }
-      break;
+      
+      // If both keys are blocked, throw the error
+      const status = getKeyStatus();
+      if (status.primaryBlocked && status.backupBlocked) {
+        throw lastError;
+      }
+      
+      // Otherwise, the handleRateLimit in the response check will switch keys
+      // and we'll retry on the next iteration
     }
   }
-
-  throw lastError || new Error("Failed to extract profile from file");
 }
 
 export class GroqChatService {
@@ -434,8 +642,8 @@ export class GroqChatService {
     this.history.push({ role: "user", content: userMessage });
     this.extractInfo(userMessage);
 
-    // Try with automatic fallback to backup key
-    for (let attempt = 0; attempt < 2; attempt++) {
+    // Keep trying while we have available API keys
+    while (true) {
       try {
         const apiKey = getApiKey();
         const res = await fetch(GROQ_URL, {
@@ -446,11 +654,27 @@ export class GroqChatService {
         
         if (!res.ok) {
           // Check if it's a rate limit error (429)
-          if (res.status === 429 && attempt === 0 && switchToBackupKey()) {
-            console.log("Rate limit hit on chat, retrying with backup key...");
-            continue;
+          if (res.status === 429) {
+            console.log("Rate limit hit on chat, attempting to switch API key...");
+            if (handleRateLimit()) {
+              console.log("Successfully switched to alternate API key, retrying...");
+              continue;
+            } else {
+              console.log("All API keys are rate limited");
+              const status = getKeyStatus();
+              const keyCount = status.totalKeys;
+              throw new Error(`API_RATE_LIMIT: All ${keyCount} API key${keyCount > 1 ? 's are' : ' is'} rate limited. Please wait a moment and try again.`);
+            }
           }
-          throw new Error(`Groq API error: ${res.status}`);
+          
+          // Provide user-friendly error messages
+          if (res.status === 401) {
+            throw new Error("API_AUTH_ERROR: API authentication failed. Please check your API keys.");
+          } else if (res.status === 500 || res.status === 503) {
+            throw new Error("API_SERVER_ERROR: The AI service is temporarily unavailable. Please try again in a moment.");
+          } else {
+            throw new Error(`Groq API error: ${res.status}`);
+          }
         }
         
         const data = await res.json();
@@ -460,23 +684,25 @@ export class GroqChatService {
         const shouldSearch = reply.includes("Let me search for matching trials now") || reply.includes("search for matching trials now");
         return { response: reply, state: this.state, shouldSearch };
       } catch (error) {
-        if (attempt === 0 && !isUsingBackup && GROQ_API_KEY_BACKUP) {
-          switchToBackupKey();
-          console.log("Error on chat, retrying with backup key...");
-          continue;
-        }
         console.error("Groq error:", error);
-        return { response: "I'm having a brief connection issue. Could you try again?", state: this.state, shouldSearch: false };
+        
+        // Re-throw the error to be handled by the caller
+        throw error;
       }
     }
-    
-    return { response: "I'm having a brief connection issue. Could you try again?", state: this.state, shouldSearch: false };
   }
 
   private extractDiagnosisDateFromContext(msg: string) {
     const lower = msg.toLowerCase();
     const skipPhrases = ["skip", "don't know", "not sure", "rather not", "prefer not", "no idea", "unsure"];
-    if (skipPhrases.some(p => lower.includes(p))) { if (!this.state.diagnosis_date) this.state.diagnosis_date = "Not specified"; return; }
+    
+    // Only mark as "Not specified" if user explicitly says skip AND we're in the diagnosis date context
+    const inDiagnosisContext = this.history.some(h => h.content.toLowerCase().includes("when were you") || h.content.toLowerCase().includes("diagnosis date"));
+    if (inDiagnosisContext && skipPhrases.some(p => lower.includes(p))) { 
+      if (!this.state.diagnosis_date) this.state.diagnosis_date = "Not specified"; 
+      return; 
+    }
+    
     const yearMatch = lower.match(/\b(20\d{2}|19\d{2})\b/);
     if (yearMatch) { this.state.diagnosis_date = yearMatch[1]; return; }
     const patterns = [/(\d+)\s*months?\s*ago/i, /(\d+)\s*years?\s*ago/i, /about\s+(\d+)\s*(months?|years?)/i, /(last\s+year|recently|just\s+diagnosed|this\s+year)/i, /(a\s+few\s+months|a\s+few\s+years)/i];
@@ -504,18 +730,23 @@ export class GroqChatService {
       if (lower.includes(c)) { this.state.cancer_type = c === "colon" ? "Colorectal" : c.charAt(0).toUpperCase() + c.slice(1); break; }
     }
 
-    const stageMatch = lower.match(/stage\s*(i{1,4}v?|[1-4]|iv|advanced|early|metastatic)/i);
+    // Enhanced stage extraction with simple language support
+    const stageMatch = lower.match(/stage\s*(i{1,4}v?|[1-4]|iv|advanced|early|metastatic|spread)/i);
     if (stageMatch) {
       let s = stageMatch[1].toUpperCase();
-      if (s === "ADVANCED" || s === "METASTATIC") s = "IV";
+      if (s === "ADVANCED" || s === "METASTATIC" || s === "SPREAD") s = "IV";
       if (s === "EARLY") s = "I";
       const map: Record<string, string> = { "1": "I", "2": "II", "3": "III", "4": "IV" };
       this.state.disease_stage = `Stage ${map[s] || s}`;
     }
+    
+    // Additional patterns for simple language
     if (!this.state.disease_stage) {
+      if (lower.includes("has spread") || lower.includes("it spread") || lower.includes("it's spread")) this.state.disease_stage = "Stage IV";
+      if (lower.includes("more advanced") || lower.includes("pretty advanced")) this.state.disease_stage = "Stage III";
       if (lower.includes("advanced")) this.state.disease_stage = "Stage IV";
       if (lower.includes("metastatic")) this.state.disease_stage = "Stage IV";
-      if (lower.includes("early stage")) this.state.disease_stage = "Stage I";
+      if (lower.includes("early stage") || lower.includes("it's early") || lower.includes("early,")) this.state.disease_stage = "Stage I";
     }
 
     const ageMatch = lower.match(/\b(\d{1,3})\s*(?:years?\s*old|yo|y\/o)\b/i) || lower.match(/\b(?:i'm|i am|age|aged)\s*(\d{1,3})\b/i) || lower.match(/\b(\d{2})\s*(?:year|yr)\b/i);
@@ -556,8 +787,9 @@ export class GroqChatService {
     };
     for (const [key, val] of Object.entries(provinces)) { if (lower.includes(key)) { this.state.province = val; break; } }
 
+    // Only mark biomarkers as explicitly skipped if user says so
     const noBiomarkers = ["no biomarkers", "no biomarker", "don't know", "skip", "none", "not sure", "no idea", "i don't have"];
-    if (noBiomarkers.some(p => lower.includes(p))) {
+    if (noBiomarkers.some(p => lower.includes(p)) && (lower.includes("biomarker") || this.history.some(h => h.content.toLowerCase().includes("biomarker")))) {
       if (!this.state.biomarkers) this.state.biomarkers = [];
     } else {
       const bms = ["egfr", "alk", "ros1", "braf", "kras", "pd-l1", "her2", "brca", "btk", "bcl-2", "mss", "msi", "folr1", "ret", "fgfr", "ntrk", "met", "lag-3"];
@@ -571,7 +803,14 @@ export class GroqChatService {
     }
 
     this.extractDiagnosisDateFromContext(msg);
-    this.state.isComplete = !!(this.state.cancer_type && this.state.disease_stage && this.state.age && (this.state.city || this.state.province));
+    
+    // Only mark as complete if ALL required fields are actually provided (not just asked)
+    this.state.isComplete = !!(
+      this.state.cancer_type && 
+      this.state.disease_stage && 
+      this.state.age && 
+      (this.state.city || this.state.province)
+    );
   }
 
   getState(): ConversationState { return this.state; }

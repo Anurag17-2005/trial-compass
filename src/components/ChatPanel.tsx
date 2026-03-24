@@ -68,12 +68,12 @@ function ProgressBar({ state, searchDone }: { state: ConversationState; searchDo
           const active = currentStep === idx && !searchDone;
           return (
             <div key={step.key} className="flex flex-col items-center gap-0.5" style={{ flex: 1 }}>
-              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold transition-all duration-300 ${
-                done ? "bg-primary text-primary-foreground shadow-sm" :
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${
+                done ? "bg-primary text-primary-foreground shadow-md" :
                 active ? "bg-primary/20 text-primary border-2 border-primary animate-pulse" :
                 "bg-border text-muted-foreground"
               }`}>
-                {done ? "✓" : step.icon}
+                {done ? "✓" : active ? step.icon : step.icon}
               </div>
               <span className={`text-[8px] font-medium leading-none text-center ${done || active ? "text-primary" : "text-muted-foreground"}`}>
                 {step.label}
@@ -82,10 +82,10 @@ function ProgressBar({ state, searchDone }: { state: ConversationState; searchDo
           );
         })}
         <div className="flex flex-col items-center gap-0.5" style={{ flex: 1 }}>
-          <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold transition-all duration-300 ${
-            searchDone ? "bg-emerald-500 text-white shadow-sm" : "bg-border text-muted-foreground"
+          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${
+            searchDone ? "bg-emerald-500 text-white shadow-md" : "bg-border text-muted-foreground"
           }`}>
-            {searchDone ? "🎯" : "🔍"}
+            {searchDone ? "✓" : "🔍"}
           </div>
           <span className={`text-[8px] font-medium leading-none ${searchDone ? "text-emerald-600" : "text-muted-foreground"}`}>
             Results
@@ -156,25 +156,51 @@ function ConfirmationTable({ content }: { content: string }) {
 }
 
 // ── Dynamic chips ──────────────────────────────────────────────────────────
-function getDynamicSuggestions(lastContent: string, hasAnyTrialResults: boolean): string[] {
+function extractSuggestionsFromResponse(content: string): string[] {
+  // Extract suggestions from LLM response in format: [SUGGESTIONS: "opt1" | "opt2" | "opt3"]
+  const match = content.match(/\[SUGGESTIONS:\s*([^\]]+)\]/i);
+  if (match) {
+    const suggestionsText = match[1];
+    // Split by | and clean up quotes
+    return suggestionsText
+      .split('|')
+      .map(s => s.trim().replace(/^["']|["']$/g, ''))
+      .filter(s => s.length > 0);
+  }
+  return [];
+}
+
+function cleanResponseContent(content: string): string {
+  // Remove the [SUGGESTIONS: ...] part from the displayed content
+  return content.replace(/\[SUGGESTIONS:\s*[^\]]+\]/i, '').trim();
+}
+
+function getDynamicSuggestions(lastContent: string, hasAnyTrialResults: boolean, searchDone: boolean): string[] {
+  // First try to extract LLM-generated suggestions
+  const llmSuggestions = extractSuggestionsFromResponse(lastContent);
+  if (llmSuggestions.length > 0) {
+    return llmSuggestions;
+  }
+  
+  // Fallback to static suggestions if LLM didn't provide any
   const c = lastContent.toLowerCase();
   if ((c.includes("|") && c.includes("cancer type")) || c.includes("does everything look correct") || c.includes("look correct") || c.includes("find your matching trials once you confirm") || c.includes("once you confirm"))
     return ["Yes, that's correct!", "I need to change something"];
   if (c.includes("what would you like to change") || c.includes("which detail"))
     return ["Change cancer type", "Change stage", "Change age", "Change location"];
-  if (c.includes("what stage") || c.includes("which stage") || c.includes("stage has your") || c.includes("stage is your"))
-    return ["Stage 1", "Stage 2", "Stage 3", "Stage 4"];
+  if (c.includes("what stage") || c.includes("which stage") || c.includes("stage has your") || c.includes("stage is your") || c.includes("early") || c.includes("advanced") || c.includes("spread"))
+    return ["It's early", "Stage 2", "Stage 3", "It has spread"];
   if (c.includes("what type") || c.includes("type of cancer") || c.includes("start fresh") || c.includes("let's start") || c.includes("diagnosed with"))
     return ["Lung cancer", "Breast cancer", "Colorectal cancer", "Prostate cancer"];
   if (c.includes("how old") || c.includes("your age") || c.includes("old are you"))
-    return ["I'm 35 years old", "I'm 45 years old", "I'm 55 years old", "I'm 65 years old"];
+    return ["I'm 35 years old", "I'm 45", "I'm 55", "I'm 65"];
   if (c.includes("which city") || c.includes("city in canada") || c.includes("city are you") || (c.includes("located") && !c.includes("trial")))
-    return ["I live in Toronto", "I live in Vancouver", "I live in Montreal", "I live in Calgary"];
+    return ["Toronto", "Vancouver", "Montreal", "Calgary"];
   if (c.includes("biomarker") || c.includes("egfr") || c.includes("pd-l1") || c.includes("mutation"))
-    return ["EGFR positive", "PD-L1 positive", "I don't know", "No biomarkers"];
+    return ["EGFR positive", "PD-L1 positive", "I don't know", "Skip this"];
   if (c.includes("when were you first") || c.includes("first diagnosed") || c.includes("how long ago") || c.includes("diagnosis date"))
-    return ["About 3 months ago", "About 6 months ago", "About a year ago", "I'd rather not say"];
-  if (hasAnyTrialResults)
+    return ["About 3 months ago", "About 6 months ago", "Last year", "I'd rather skip"];
+  if (hasAnyTrialResults && searchDone)
     return ["Find nearest trials", "Show best matches", "Show recruiting trials", "Best and nearest"];
   return [];
 }
@@ -379,9 +405,22 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
       }
     } catch (error) {
       console.error("Extraction error:", error);
+      
+      // Parse error message for user-friendly display
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      let userMessage = "I had trouble reading that file. Please try a clearer image or a different PDF, or just type your details directly.";
+      
+      if (errorMessage.includes("API_RATE_LIMIT")) {
+        userMessage = "⏱️ We've hit our API rate limit. Please wait a moment and try again, or type your details directly instead.";
+      } else if (errorMessage.includes("API_AUTH_ERROR")) {
+        userMessage = "🔑 There's an issue with the API authentication. Please contact support or type your details directly.";
+      } else if (errorMessage.includes("API_SERVER_ERROR")) {
+        userMessage = "🔧 The AI service is temporarily unavailable. Please try again in a moment, or type your details directly.";
+      }
+      
       setMessages(prev => [...prev, {
         id: Date.now().toString(), role: "assistant",
-        content: "I had trouble reading that file. Please try a clearer image or a different PDF, or just type your details directly.",
+        content: userMessage,
       }]);
       setUploadedFileName(null);
       setIsOnline(false);
@@ -447,7 +486,22 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
       }
     } catch (error) {
       console.error("Chat error:", error);
-      setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: "Sorry, I'm having trouble connecting. Please try again." }]);
+      
+      // Parse error message for user-friendly display
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      let userMessage = "Sorry, I'm having trouble connecting. Please try again.";
+      
+      if (errorMessage.includes("API_RATE_LIMIT")) {
+        userMessage = "⏱️ We've hit our API rate limit. Please wait a moment and try again. Our backup system will kick in shortly.";
+      } else if (errorMessage.includes("API_AUTH_ERROR")) {
+        userMessage = "🔑 There's an authentication issue with the AI service. Please contact support.";
+      } else if (errorMessage.includes("API_SERVER_ERROR")) {
+        userMessage = "🔧 The AI service is temporarily unavailable. Please try again in a moment.";
+      } else if (errorMessage.includes("NetworkError") || errorMessage.includes("Failed to fetch")) {
+        userMessage = "🌐 Network connection issue. Please check your internet connection and try again.";
+      }
+      
+      setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: userMessage }]);
       setIsOnline(false);
       setLastErrorTime(Date.now());
     }
@@ -465,7 +519,7 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
   const lastAssistantMsg = [...messages].reverse().find(m => m.role === "assistant");
   const lastContent = lastAssistantMsg?.content || "";
   const hasAnyTrialResults = messages.some(m => m.trials && m.trials.length > 0);
-  const suggestions = getDynamicSuggestions(lastContent, hasAnyTrialResults && searchDone);
+  const suggestions = getDynamicSuggestions(lastContent, hasAnyTrialResults, searchDone);
 
   return (
     <div className="flex flex-col h-full bg-card">
@@ -525,7 +579,7 @@ const ChatPanel = ({ userProfile, onTrialsFound, onZoomToLocation, onViewSummary
               <div className="chat-bubble-user"><p className="text-sm">{msg.content}</p></div>
             ) : (
               <div className="w-full max-w-md space-y-2">
-                <div className="chat-bubble-assistant"><ConfirmationTable content={msg.content} /></div>
+                <div className="chat-bubble-assistant"><ConfirmationTable content={cleanResponseContent(msg.content)} /></div>
                 {msg.trials && msg.trials.length > 0 && msg.trials.map((trial) => (
                   <div key={trial.trial_id} ref={(el) => { trialCardRefs.current[trial.trial_id] = el; }}>
                     <TrialResultCard trial={trial} userProfile={userProfile} onViewDetails={onViewSummary} onZoomToLocation={onZoomToLocation} />

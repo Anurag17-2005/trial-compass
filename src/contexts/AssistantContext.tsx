@@ -43,7 +43,7 @@ export const AssistantProvider = ({ children }: { children: ReactNode }) => {
     {
       id: "welcome",
       role: "assistant",
-      content: "Hi there 👋 I'm here to help you find clinical trials in Canada. I know navigating this can feel overwhelming, so I'll keep things simple. To start — what type of cancer have you been diagnosed with?",
+      content: "Hi there 👋 I'm here to help you find clinical trials in Canada. You'll see your progress at the top, and you can type below, upload medical reports, or use suggestions. The map and trial summaries will appear on the left as we go. Let's take it one step at a time. What type of cancer are you dealing with?\n\n[SUGGESTIONS: \"Lung cancer\" | \"Breast cancer\" | \"Colorectal cancer\" | \"Prostate cancer\"]",
     },
   ]);
   const [mapTrials, setMapTrials] = useState<Trial[]>([]);
