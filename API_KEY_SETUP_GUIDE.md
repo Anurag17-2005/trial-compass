@@ -29,15 +29,15 @@ Open the app and start chatting. Check the console for key switching messages.
 
 ## Current Configuration
 
-Your `.env` file is already configured with 3 keys:
+Your `.env` file should be configured with 3 keys:
 
 ```env
-VITE_GROQ_API_KEY="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"
-VITE_GROQ_API_KEY_BACKUP="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"
-VITE_GROQ_API_KEY_TERTIARY="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"
+VITE_GROQ_API_KEY="your_primary_key_here"
+VITE_GROQ_API_KEY_BACKUP="your_backup_key_here"
+VITE_GROQ_API_KEY_TERTIARY="your_tertiary_key_here"
 ```
 
-✅ You're all set with maximum uptime!
+✅ Once configured, you'll have maximum uptime!
 
 ## How It Works
 

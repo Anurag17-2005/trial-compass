@@ -10,13 +10,13 @@ The system now supports **THREE API keys** for maximum uptime and rate limit han
 
 ```env
 # Primary API key (required)
-VITE_GROQ_API_KEY="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"
+VITE_GROQ_API_KEY="your_primary_key_here"
 
 # Backup API key (recommended)
-VITE_GROQ_API_KEY_BACKUP="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"
+VITE_GROQ_API_KEY_BACKUP="your_backup_key_here"
 
 # Tertiary API key (optional, for maximum uptime)
-VITE_GROQ_API_KEY_TERTIARY="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"
+VITE_GROQ_API_KEY_TERTIARY="your_tertiary_key_here"
 ```
 
 ## How It Works
